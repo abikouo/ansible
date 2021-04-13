@@ -98,7 +98,7 @@ exclude_patterns = [
     'porting_guides/porting_guide_base_2.10.rst',
     'porting_guides/porting_guide_core_2.11.rst',
     'roadmap/index.rst',
-    'roadmap/ansible_base_roadmap_index.rst',
+    'roadmap/ansible_core_roadmap_index.rst',
     'roadmap/ROADMAP_2_10.rst',
     'roadmap/ROADMAP_2_11.rst'
 ]
@@ -290,6 +290,7 @@ autoclass_content = 'both'
 intersphinx_mapping = {'python': ('https://docs.python.org/2/', (None, '../python2.inv')),
                        'python3': ('https://docs.python.org/3/', (None, '../python3.inv')),
                        'jinja2': ('http://jinja.palletsprojects.com/', (None, '../jinja2.inv')),
+                       'ansible_3': ('https://docs.ansible.com/ansible/3/', (None, '../ansible_3.inv')),
                        'ansible_2_10': ('https://docs.ansible.com/ansible/2.10/', (None, '../ansible_2_10.inv')),
                        'ansible_2_9': ('https://docs.ansible.com/ansible/2.9/', (None, '../ansible_2_9.inv')),
                        'ansible_2_8': ('https://docs.ansible.com/ansible/2.8/', (None, '../ansible_2_8.inv')),
