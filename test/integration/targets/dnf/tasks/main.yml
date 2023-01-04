@@ -23,6 +23,10 @@
   when: (ansible_distribution == 'Fedora' and ansible_distribution_major_version is version('23', '>=')) or
         (ansible_distribution in ['RedHat', 'CentOS'] and ansible_distribution_major_version is version('8', '>='))
 
+- include_tasks: skip_broken_and_nobest.yml
+  when: (ansible_distribution == 'Fedora' and ansible_distribution_major_version is version('23', '>=')) or
+        (ansible_distribution in ['RedHat', 'CentOS'] and ansible_distribution_major_version is version('8', '>='))
+
 - include_tasks: filters_check_mode.yml
   when: (ansible_distribution == 'Fedora' and ansible_distribution_major_version is version('23', '>=')) or
         (ansible_distribution in ['RedHat', 'CentOS'] and ansible_distribution_major_version is version('8', '>='))
@@ -54,15 +58,17 @@
     - ansible_distribution_major_version is version('23', '>=')
 
 - include_tasks: modularity.yml
-  when: (ansible_distribution == 'Fedora' and ansible_distribution_major_version is version('29', '>=')) or
-        (ansible_distribution in ['RedHat', 'CentOS'] and ansible_distribution_major_version is version('8', '>='))
+  when:
+    - astream_name is defined
+    - (ansible_distribution == 'Fedora' and ansible_distribution_major_version is version('29', '>=')) or
+      (ansible_distribution in ['RedHat', 'CentOS'] and ansible_distribution_major_version is version('8', '>='))
+  tags:
+    - dnf_modularity
 
 - include_tasks: logging.yml
   when: (ansible_distribution == 'Fedora' and ansible_distribution_major_version is version('31', '>=')) or
         (ansible_distribution in ['RedHat', 'CentOS'] and ansible_distribution_major_version is version('8', '>='))
 
-# TODO: Construct our own instance where 'nobest' applies, so we can stop using
-#       a third-party repo to test this behavior.
-- include_tasks: nobest.yml
-  when: (ansible_distribution == 'Fedora' and ansible_distribution_major_version is version('24', '>=')) or
+- include_tasks: cacheonly.yml
+  when: (ansible_distribution == 'Fedora' and ansible_distribution_major_version is version('23', '>=')) or
         (ansible_distribution in ['RedHat', 'CentOS'] and ansible_distribution_major_version is version('8', '>='))

@@ -314,7 +314,7 @@ By default in Ansible 2.8::
     ansible-playbook --become --ask-become-pass site.yml
     BECOME password:
 
-If you want the prompt to display the specific ``become_method`` you're using, instead of the agnostic value ``BECOME``, set :ref:`AGNOSTIC_BECOME_PROMPT` to ``False`` in your Ansible configuration.
+If you want the prompt to display the specific ``become_method`` you're using, instead of the general value ``BECOME``, set :ref:`AGNOSTIC_BECOME_PROMPT` to ``False`` in your Ansible configuration.
 
 By default in Ansible 2.7, or with ``AGNOSTIC_BECOME_PROMPT=False`` in Ansible 2.8::
 
@@ -347,7 +347,7 @@ Deprecated
      removed in 2.12.  If you need the old behavior switch to ``FactCache.first_order_merge()``
      instead.
 
-* Supporting file-backed caching via self.cache is deprecated and will
+* Supporting file-backed caching through self.cache is deprecated and will
   be removed in Ansible 2.12. If you maintain an inventory plugin, update it to use ``self._cache`` as a dictionary. For implementation details, see
   the :ref:`developer guide on inventory plugins<inventory_plugin_caching>`.
 
@@ -416,7 +416,7 @@ Noteworthy module changes
 * The ``foreman`` and ``katello`` modules have been deprecated in favor of a set of modules that are broken out per entity with better idempotency in mind.
 * The ``foreman`` and ``katello`` modules replacement is officially part of the Foreman Community and supported there.
 * The ``tower_credential`` module originally required the ``ssh_key_data`` to be the path to a ssh_key_file.
-  In order to work like Tower/AWX, ``ssh_key_data`` now contains the content of the file.
+  In order to work like AWX/Tower/RHAAP, ``ssh_key_data`` now contains the content of the file.
   The previous behavior can be achieved with ``lookup('file', '/path/to/file')``.
 * The ``win_scheduled_task`` module deprecated support for specifying a trigger repetition as a list and this format
   will be removed in Ansible 2.12. Instead specify the repetition as a dictionary value.
@@ -543,7 +543,7 @@ Plugins
 
 * ``osx_say`` callback plugin was renamed into :ref:`say <say_callback>`.
 
-* Inventory plugins now support caching via cache plugins. To start using a cache plugin with your inventory see the section on caching in the :ref:`inventory guide<using_inventory>`. To port a custom cache plugin to be compatible with inventory see :ref:`developer guide on cache plugins<developing_cache_plugins>`.
+* Inventory plugins now support caching through cache plugins. To start using a cache plugin with your inventory see the section on caching in the :ref:`inventory guide<using_inventory>`. To port a custom cache plugin to be compatible with inventory see :ref:`developer guide on cache plugins<developing_cache_plugins>`.
 
 Porting custom scripts
 ======================

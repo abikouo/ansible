@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # (c) 2017, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
@@ -20,8 +19,9 @@ options:
       - Since 2.8 this is a list and can support multiple package managers per system.
       - The 'portage' and 'pkg' options were added in version 2.8.
       - The 'apk' option was added in version 2.11.
+      - The 'pkg_info' option was added in version 2.13.
     default: ['auto']
-    choices: ['auto', 'rpm', 'apt', 'portage', 'pkg', 'pacman', 'apk']
+    choices: ['auto', 'rpm', 'apt', 'portage', 'pkg', 'pacman', 'apk', 'pkg_info']
     type: list
     elements: str
   strategy:
@@ -41,8 +41,18 @@ author:
   - Matthew Jones (@matburt)
   - Brian Coca (@bcoca)
   - Adam Miller (@maxamillion)
-notes:
-  - Supports C(check_mode).
+extends_documentation_fragment:
+  -  action_common_attributes
+  -  action_common_attributes.facts
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: none
+    facts:
+        support: full
+    platform:
+        platforms: posix
 '''
 
 EXAMPLES = '''
@@ -205,12 +215,32 @@ ansible_facts:
             ],
           }
         }
+        # Sample pkg_info
+        {
+          "packages": {
+            "curl": [
+              {
+                  "name": "curl",
+                  "source": "pkg_info",
+                  "version": "7.79.0"
+              }
+            ],
+            "intel-firmware": [
+              {
+                  "name": "intel-firmware",
+                  "source": "pkg_info",
+                  "version": "20210608v0"
+              }
+            ],
+          }
+        }
 '''
 
 import re
 
 from ansible.module_utils._text import to_native, to_text
 from ansible.module_utils.basic import AnsibleModule, missing_required_lib
+from ansible.module_utils.common.locale import get_best_parsable_locale
 from ansible.module_utils.common.process import get_bin_path
 from ansible.module_utils.common.respawn import has_respawned, probe_interpreters_for_module, respawn_module
 from ansible.module_utils.facts.packages import LibMgr, CLIMgr, get_all_pkg_managers
@@ -310,7 +340,8 @@ class PACMAN(CLIMgr):
     CLI = 'pacman'
 
     def list_installed(self):
-        rc, out, err = module.run_command([self._cli, '-Qi'], environ_update=dict(LC_ALL='C'))
+        locale = get_best_parsable_locale(module)
+        rc, out, err = module.run_command([self._cli, '-Qi'], environ_update=dict(LC_ALL=locale))
         if rc != 0 or err:
             raise Exception("Unable to list packages rc=%s : %s" % (rc, err))
         return out.split("\n\n")[:-1]
@@ -420,6 +451,29 @@ class APK(CLIMgr):
                 'name': nvr[0],
                 'version': nvr[1],
                 'release': nvr[2],
+            }
+        except IndexError:
+            return raw_pkg_details
+
+
+class PKG_INFO(CLIMgr):
+
+    CLI = 'pkg_info'
+
+    def list_installed(self):
+        rc, out, err = module.run_command([self._cli, '-a'])
+        if rc != 0 or err:
+            raise Exception("Unable to list packages rc=%s : %s" % (rc, err))
+        return out.splitlines()
+
+    def get_package_details(self, package):
+        raw_pkg_details = {'name': package, 'version': ''}
+        details = package.split(maxsplit=1)[0].rsplit('-', maxsplit=1)
+
+        try:
+            return {
+                'name': details[0],
+                'version': details[1],
             }
         except IndexError:
             return raw_pkg_details

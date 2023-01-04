@@ -1,5 +1,4 @@
 OS := $(shell uname -s)
-SITELIB = $(shell python -c "from distutils.sysconfig import get_python_lib; print get_python_lib()"):
 PLUGIN_FORMATTER=../../hacking/build-ansible.py docs-build
 TESTING_FORMATTER=../bin/testing_formatter.sh
 KEYWORD_DUMPER=../../hacking/build-ansible.py document-keywords
@@ -45,7 +44,7 @@ endif
 
 DOC_PLUGINS ?= become cache callback cliconf connection httpapi inventory lookup netconf shell strategy vars
 
-PYTHON=python
+PYTHON ?= python
 # fetch version from project release.py as single source-of-truth
 VERSION := $(shell $(PYTHON) ../../packaging/release/versionhelper/version_helper.py --raw || echo error)
 ifeq ($(findstring error,$(VERSION)), error)
@@ -56,6 +55,7 @@ MAJOR_VERSION := $(shell $(PYTHON) ../../packaging/release/versionhelper/version
 ifeq ($(findstring error,$(MAJOR_VERSION)), error)
 $(error "version_helper failed to determine major version")
 endif
+
 
 assertrst:
 ifndef rst
@@ -68,42 +68,51 @@ docs: htmldocs
 
 coredocs: core_htmldocs
 
+
 generate_rst: collections_meta config cli keywords plugins testing
-core_generate_rst: collections_meta config cli keywords base_plugins testing
+core_generate_rst: collections_meta config cli keywords core_plugins testing
 
 # At the moment localizing the plugins and collections is not required for the ongoing
 # localisation effort. It will come at a later time.
 gettext_generate_rst: collections_meta config cli keywords testing
 
-# The following two symlinks are necessary to produce two different docsets
+# The following symlinks are necessary to produce two different docsets
 # from the same set of rst files (Ansible the package docs, and core docs).
 # Symlink the relevant index into place for building Ansible docs
-ansible_structure: generate_rst
+ansible_structure:
 	# We must have python and python-packaging for the version_helper
 	# script so use it for version comparison
-	if python -c "import sys, packaging.version as p; sys.exit(not p.Version('$(MAJOR_VERSION)') >  p.Version('2.10'))" ; then \
-		echo "Creating symlinks in generate_rst"; \
+	if $(PYTHON) -c "import sys, packaging.version as p; sys.exit(not p.Version('$(MAJOR_VERSION)') >  p.Version('2.10'))" ; then \
+		echo "Creating symlinks in ansible_structure"; \
 		ln -sf ../rst/ansible_index.rst rst/index.rst; \
+		ln -sf ../dev_guide/ansible_index.rst rst/dev_guide/index.rst; \
 		ln -sf ../sphinx_conf/ansible_conf.py rst/conf.py; \
 	else \
-		echo 'Creating symlinks for older ansible in generate_rst'; \
+		echo 'Creating symlinks for older ansible in ansible_structure'; \
 		ln -sf ../rst/2.10_index.rst rst/index.rst; \
 		ln -sf ../sphinx_conf/2.10_conf.py rst/conf.py; \
 	fi
 
 # Symlink the relevant index into place for building core docs
-core_structure: core_generate_rst
-	@echo "Creating symlinks in core_generate_rst"
+core_structure:
+	@echo "Creating symlinks in core_structure"
 	-ln -sf ../rst/core_index.rst rst/index.rst
+	-ln -sf ../dev_guide/core_index.rst rst/dev_guide/index.rst
+# set up the correct core conf.py to use for English vs a translated language
+ifdef LANGOPTS
+	-ln -sf ../sphinx_conf/core_lang_conf.py rst/conf.py
+else
 	-ln -sf ../sphinx_conf/core_conf.py rst/conf.py
+endif
 
-# Symlink the relevant index into place for building core docs
-gettext_structure: gettext_generate_rst
-	@echo "Creating symlinks in gettext_generate_rst"
+# Symlink the relevant index into place for building core translated docs
+gettext_structure:
+	@echo "Creating symlinks in gettext_structure"
 	-ln -sf ../rst/core_index.rst rst/index.rst
+	-ln -sf ../rst/dev_guide/core_index.rst rst/dev_guide/index.rst
 	-ln -sf ../sphinx_conf/all_conf.py rst/conf.py
 
-gettext: gettext_structure
+gettext: gettext_structure gettext_generate_rst
 	CPUS=$(CPUS) $(MAKE) -f Makefile.sphinx gettext
 	# if msgcat is installed handle all indexes, otherwise use the index from gettext_structure.
 	-msgcat "$(POTDIR)/core_index.pot" "$(POTDIR)/ansible_index.pot" "$(POTDIR)/2.10_index.pot" > "$(POTDIR)/tmp_index.pot" && mv "$(POTDIR)/tmp_index.pot" "$(POTDIR)/index.pot"
@@ -123,20 +132,26 @@ else
 	(cd docs/docsite/; sphinx-intl stat -d rst/locales -l $(LANGUAGES) | grep -E ' [1-9][0-9]* (fuzzy|untranslated)' | sort)
 endif
 
-htmldocs: ansible_structure
+htmldocs: ansible_structure generate_rst
 	CPUS=$(CPUS) $(MAKE) -f Makefile.sphinx html
 
-core_htmldocs: core_structure
+core_htmldocs: core_structure core_generate_rst
 	CPUS=$(CPUS) $(MAKE) -f Makefile.sphinx html
 
-singlehtmldocs: ansible_structure
+singlehtmldocs: ansible_structure generate_rst
 	CPUS=$(CPUS) $(MAKE) -f Makefile.sphinx singlehtml
 
-core_singlehtmldocs: core_structure
+core_singlehtmldocs: core_structure core_generate_rst
 	CPUS=$(CPUS) $(MAKE) -f Makefile.sphinx singlehtml
 
-linkcheckdocs: generate_rst
+# Note: The linkcheckdocs and htmlsingle targets depend on gettext_structure
+# because that one does not exclude any rst files in its conf.py.
+linkcheckdocs: gettext_structure generate_rst
 	CPUS=$(CPUS) $(MAKE) -f Makefile.sphinx linkcheck
+
+htmlsingle: assertrst gettext_structure
+	sphinx-build -j $(CPUS) -b html -d $(BUILDDIR)/doctrees ./rst $(BUILDDIR)/html rst/$(rst)
+	@echo "Output is in $(BUILDDIR)/html/$(rst:.rst=.html)"
 
 webdocs: docs
 
@@ -169,8 +184,8 @@ clean:
 			rm -rf "rst/collections/$$filename"; \
 		fi \
 	done
-	@echo "Cleanning up generated ansible_structure"
-	find -type l -delete
+	@echo "Cleaning up generated ansible_structure"
+	find . -type l -delete
 	@echo "Cleaning up legacy generated rst locations"
 	rm -rf rst/modules
 	rm -f rst/plugins/*/*.rst
@@ -178,34 +193,28 @@ clean:
 .PHONY: docs clean
 
 collections_meta: ../templates/collections_galaxy_meta.rst.j2
-	$(COLLECTION_DUMPER) --template-file=../templates/collections_galaxy_meta.rst.j2 --output-dir=rst/dev_guide/ ../../lib/ansible/galaxy/data/collections_galaxy_meta.yml
+	$(COLLECTION_DUMPER) --template-file=../templates/collections_galaxy_meta.rst.j2 --output-dir=rst/dev_guide/ $(EXTRA_COLLECTION_META_ARGS) ../../lib/ansible/galaxy/data/collections_galaxy_meta.yml
 
 # TODO: make generate_man output dir cli option
 cli:
 	mkdir -p rst/cli
-	$(GENERATE_CLI) --template-file=../templates/cli_rst.j2 --output-dir=rst/cli/ --output-format rst ../../lib/ansible/cli/*.py
+	$(GENERATE_CLI) --template-file=../templates/cli_rst.j2 --output-dir=rst/cli/ --output-format rst $(EXTRA_CLI_DUMPER_ARGS) ../../lib/ansible/cli/*.py
 
 keywords: ../templates/playbooks_keywords.rst.j2
-	$(KEYWORD_DUMPER) --template-dir=../templates --output-dir=rst/reference_appendices/ ../../lib/ansible/keyword_desc.yml
+	$(KEYWORD_DUMPER) --template-dir=../templates --output-dir=rst/reference_appendices/ ../../lib/ansible/keyword_desc.yml $(EXTRA_KEYWORD_DUMPER_ARGS)
 
 config: ../templates/config.rst.j2
-	$(CONFIG_DUMPER) --template-file=../templates/config.rst.j2 --output-dir=rst/reference_appendices/ ../../lib/ansible/config/base.yml
+	$(CONFIG_DUMPER) --template-file=../templates/config.rst.j2 --output-dir=rst/reference_appendices/ $(EXTRA_CONFIG_DUMPER_ARGS) ../../lib/ansible/config/base.yml
 
-# For now, if we're building on devel, just build base docs.  In the future we'll want to build docs that
-# are the latest versions on galaxy (using a different antsibull-docs subcommand)
 plugins:
-	$(PLUGIN_FORMATTER) full -o rst $(ANSIBLE_VERSION_ARGS) $(PLUGIN_ARGS);\
+	$(PLUGIN_FORMATTER) full -o rst $(ANSIBLE_VERSION_ARGS) $(EXTRA_PLUGIN_FORMATTER_ARGS) $(PLUGIN_ARGS)
 
 # This only builds the plugin docs included with ansible-core
-base_plugins:
-	$(PLUGIN_FORMATTER) base -o rst $(PLUGIN_ARGS);\
+core_plugins:
+	$(PLUGIN_FORMATTER) core -o rst $(EXTRA_PLUGIN_FORMATTER_ARGS) $(PLUGIN_ARGS)
 
 testing:
 	$(TESTING_FORMATTER)
 
 epub:
 	(CPUS=$(CPUS) $(MAKE) -f Makefile.sphinx epub)
-
-htmlsingle: assertrst
-	sphinx-build -j $(CPUS) -b html -d $(BUILDDIR)/doctrees ./rst $(BUILDDIR)/html rst/$(rst)
-	@echo "Output is in $(BUILDDIR)/html/$(rst:.rst=.html)"

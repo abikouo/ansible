@@ -5,12 +5,12 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 import json
+import pickle
 import traceback
 
 from ansible.module_utils._text import to_text
 from ansible.module_utils.connection import ConnectionError
 from ansible.module_utils.six import binary_type, text_type
-from ansible.module_utils.six.moves import cPickle
 from ansible.utils.display import Display
 
 display = Display()
@@ -18,7 +18,7 @@ display = Display()
 
 class JsonRpcServer(object):
 
-    _objects = set()
+    _objects = set()  # type: set[object]
 
     def handle_request(self, request):
         request = json.loads(to_text(request, errors='surrogate_then_replace'))
@@ -84,7 +84,7 @@ class JsonRpcServer(object):
             result = to_text(result)
         if not isinstance(result, text_type):
             response["result_type"] = "pickle"
-            result = to_text(cPickle.dumps(result, protocol=0))
+            result = to_text(pickle.dumps(result, protocol=0))
         response['result'] = result
         return response
 

@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # encoding: utf-8
 
 # (c) 2015-2016, Jiri Tyr <jiri.tyr@gmail.com>
@@ -22,10 +21,13 @@ description:
 options:
   async:
     description:
-      - If set to C(yes) Yum will download packages and metadata from this
+      - If set to C(true) Yum will download packages and metadata from this
         repo in parallel, if possible.
+      - In ansible-core 2.11, 2.12, and 2.13 the default value is C(true).
+      - This option has been deprecated in RHEL 8. If you're using one of the
+        versions listed above, you can set this option to None to avoid passing an
+        unknown configuration option.
     type: bool
-    default: 'yes'
   bandwidth:
     description:
       - Maximum available network bandwidth in bytes/second. Used with the
@@ -35,7 +37,7 @@ options:
         (bytes/sec) then this option is ignored. Default is C(0) (no bandwidth
         throttling).
     type: str
-    default: 0
+    default: '0'
   baseurl:
     description:
       - URL to the directory where the yum repository's 'repodata' directory
@@ -50,7 +52,7 @@ options:
       - Relative cost of accessing this repository. Useful for weighing one
         repo's packages as greater/less than any other.
     type: str
-    default: 1000
+    default: '1000'
   deltarpm_metadata_percentage:
     description:
       - When the relative size of deltarpm metadata vs pkgs is larger than
@@ -59,14 +61,14 @@ options:
         required to be half the size of the packages. Use C(0) to turn off
         this check, and always download metadata.
     type: str
-    default: 100
+    default: '100'
   deltarpm_percentage:
     description:
       - When the relative size of delta vs pkg is larger than this, delta is
         not used. Use C(0) to turn off delta rpm processing. Local repositories
         (with file:// I(baseurl)) have delta rpms turned off by default.
     type: str
-    default: 75
+    default: '75'
   description:
     description:
       - A human readable string describing the repository. This option corresponds to the "name" property in the repo file.
@@ -115,7 +117,7 @@ options:
       - Tells yum whether or not it should perform a GPG signature check on
         packages.
       - No default setting. If the value is not set, the system setting from
-        C(/etc/yum.conf) or system default of C(no) will be used.
+        C(/etc/yum.conf) or system default of C(false) will be used.
     type: bool
   gpgkey:
     description:
@@ -161,7 +163,7 @@ options:
       - Determines how yum resolves host names.
       - C(4) or C(IPv4) - resolve to IPv4 addresses only.
       - C(6) or C(IPv6) - resolve to IPv6 addresses only.
-    choices: [4, 6, IPv4, IPv6, whatever]
+    choices: ['4', '6', IPv4, IPv6, whatever]
     type: str
     default: whatever
   keepalive:
@@ -183,7 +185,7 @@ options:
       - Time (in seconds) after which the metadata will expire.
       - Default value is 6 hours.
     type: str
-    default: 21600
+    default: '21600'
   metadata_expire_filter:
     description:
       - Filter the I(metadata_expire) time, allowing a trade of speed for
@@ -225,7 +227,7 @@ options:
         expire.
       - Default value is 6 hours.
     type: str
-    default: 21600
+    default: '21600'
   name:
     description:
       - Unique repository ID. This option builds the section name of the repository in the repo file.
@@ -243,7 +245,7 @@ options:
         from 1 to 99.
       - This option only works if the YUM Priorities plugin is installed.
     type: str
-    default: 99
+    default: '99'
   protect:
     description:
       - Protect packages from updates from other repositories.
@@ -278,7 +280,7 @@ options:
       - Set the number of times any attempt to retrieve a file should retry
         before returning an error. Setting this to C(0) makes yum try forever.
     type: str
-    default: 10
+    default: '10'
   s3_enabled:
     description:
       - Enables support for S3 repositories.
@@ -287,7 +289,7 @@ options:
     default: 'no'
   skip_if_unavailable:
     description:
-      - If set to C(yes) yum will continue running if this repository cannot be
+      - If set to C(true) yum will continue running if this repository cannot be
         contacted for any reason. This should be set carefully as all repos are
         consulted for any given command.
     type: bool
@@ -297,7 +299,7 @@ options:
       - Whether yum should check the permissions on the paths for the
         certificates on the repository (both remote and local).
       - If we can't read any of the files then yum will force
-        I(skip_if_unavailable) to be C(yes). This is most useful for non-root
+        I(skip_if_unavailable) to be C(true). This is most useful for non-root
         processes which use yum on repos that have client cert files which are
         readable only by root.
     type: bool
@@ -342,7 +344,7 @@ options:
     description:
       - Number of seconds to wait for a connection before timing out.
     type: str
-    default: 30
+    default: '30'
   ui_repoid_vars:
     description:
       - When a repository id is displayed, append these yum variables to the
@@ -356,8 +358,15 @@ options:
     type: str
 
 extends_documentation_fragment:
-  - files
-
+    - action_common_attributes
+    - files
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: full
+    platform:
+        platforms: rhel
 notes:
   - All comments will be removed if modifying an existing repo file.
   - Section order is preserved in an existing repo file.
@@ -372,13 +381,13 @@ notes:
 
 EXAMPLES = '''
 - name: Add repository
-  yum_repository:
+  ansible.builtin.yum_repository:
     name: epel
     description: EPEL YUM repo
     baseurl: https://download.fedoraproject.org/pub/epel/$releasever/$basearch/
 
 - name: Add multiple repositories into the same file (1/2)
-  yum_repository:
+  ansible.builtin.yum_repository:
     name: epel
     description: EPEL YUM repo
     file: external_repos
@@ -386,7 +395,7 @@ EXAMPLES = '''
     gpgcheck: no
 
 - name: Add multiple repositories into the same file (2/2)
-  yum_repository:
+  ansible.builtin.yum_repository:
     name: rpmforge
     description: RPMforge YUM repo
     file: external_repos
@@ -396,19 +405,17 @@ EXAMPLES = '''
 
 # Handler showing how to clean yum metadata cache
 - name: yum-clean-metadata
-  command: yum clean metadata
-  args:
-    warn: no
+  ansible.builtin.command: yum clean metadata
 
 # Example removing a repository and cleaning up metadata cache
 - name: Remove repository (and clean up left-over metadata)
-  yum_repository:
+  ansible.builtin.yum_repository:
     name: epel
     state: absent
   notify: yum-clean-metadata
 
 - name: Remove repository from a specific repo file
-  yum_repository:
+  ansible.builtin.yum_repository:
     name: epel
     file: external_repos
     state: absent
@@ -644,7 +651,7 @@ def main():
         username=dict(),
     )
 
-    argument_spec['async'] = dict(type='bool', default=True)
+    argument_spec['async'] = dict(type='bool')
 
     module = AnsibleModule(
         argument_spec=argument_spec,

@@ -1,21 +1,24 @@
+#!/usr/bin/env python
 # Copyright: (c) 2017, Brian Coca <bcoca@ansible.com>
 # Copyright: (c) 2018, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+# PYTHON_ARGCOMPLETE_OK
 
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
+# ansible.cli needs to be imported first, to ensure the source bin/* scripts run that code first
+from ansible.cli import CLI
+
 import sys
 
 import argparse
-from operator import attrgetter
 
 from ansible import constants as C
 from ansible import context
-from ansible.cli import CLI
 from ansible.cli.arguments import option_helpers as opt_help
 from ansible.errors import AnsibleError, AnsibleOptionsError
-from ansible.module_utils._text import to_bytes, to_native
+from ansible.module_utils._text import to_bytes, to_native, to_text
 from ansible.utils.vars import combine_vars
 from ansible.utils.display import Display
 from ansible.vars.plugins import get_vars_from_inventory_sources, get_vars_from_path
@@ -45,6 +48,8 @@ INTERNAL_VARS = frozenset(['ansible_diff_mode',
 
 class InventoryCLI(CLI):
     ''' used to display or dump the configured inventory as Ansible sees it '''
+
+    name = 'ansible-inventory'
 
     ARGUMENTS = {'host': 'The name of a host to match in the inventory, relevant when using --list',
                  'group': 'The name of a group in the inventory, relevant when using --graph', }
@@ -158,8 +163,8 @@ class InventoryCLI(CLI):
                 display.display(results)
             else:
                 try:
-                    with open(to_bytes(outfile), 'wt') as f:
-                        f.write(results)
+                    with open(to_bytes(outfile), 'wb') as f:
+                        f.write(to_bytes(results))
                 except (OSError, IOError) as e:
                     raise AnsibleError('Unable to write to destination file (%s): %s' % (to_native(outfile), to_native(e)))
             sys.exit(0)
@@ -172,21 +177,29 @@ class InventoryCLI(CLI):
         if context.CLIARGS['yaml']:
             import yaml
             from ansible.parsing.yaml.dumper import AnsibleDumper
-            results = yaml.dump(stuff, Dumper=AnsibleDumper, default_flow_style=False)
+            results = to_text(yaml.dump(stuff, Dumper=AnsibleDumper, default_flow_style=False, allow_unicode=True))
         elif context.CLIARGS['toml']:
-            from ansible.plugins.inventory.toml import toml_dumps, HAS_TOML
-            if not HAS_TOML:
+            from ansible.plugins.inventory.toml import toml_dumps
+            try:
+                results = toml_dumps(stuff)
+            except TypeError as e:
                 raise AnsibleError(
-                    'The python "toml" library is required when using the TOML output format'
+                    'The source inventory contains a value that cannot be represented in TOML: %s' % e
                 )
-            results = toml_dumps(stuff)
+            except KeyError as e:
+                raise AnsibleError(
+                    'The source inventory contains a non-string key (%s) which cannot be represented in TOML. '
+                    'The specified key will need to be converted to a string. Be aware that if your playbooks '
+                    'expect this key to be non-string, your playbooks will need to be modified to support this '
+                    'change.' % e.args[0]
+                )
         else:
             import json
             from ansible.parsing.ajson import AnsibleJSONEncoder
             try:
-                results = json.dumps(stuff, cls=AnsibleJSONEncoder, sort_keys=True, indent=4, preprocess_unsafe=True)
+                results = json.dumps(stuff, cls=AnsibleJSONEncoder, sort_keys=True, indent=4, preprocess_unsafe=True, ensure_ascii=False)
             except TypeError as e:
-                results = json.dumps(stuff, cls=AnsibleJSONEncoder, sort_keys=False, indent=4, preprocess_unsafe=True)
+                results = json.dumps(stuff, cls=AnsibleJSONEncoder, sort_keys=False, indent=4, preprocess_unsafe=True, ensure_ascii=False)
                 display.warning("Could not sort JSON output due to issues while sorting keys: %s" % to_native(e))
 
         return results
@@ -259,11 +272,11 @@ class InventoryCLI(CLI):
 
         result = [self._graph_name('@%s:' % group.name, depth)]
         depth = depth + 1
-        for kid in sorted(group.child_groups, key=attrgetter('name')):
+        for kid in group.child_groups:
             result.extend(self._graph_group(kid, depth))
 
         if group.name != 'all':
-            for host in sorted(group.hosts, key=attrgetter('name')):
+            for host in group.hosts:
                 result.append(self._graph_name(host.name, depth))
                 if context.CLIARGS['show_vars']:
                     result.extend(self._show_vars(self._get_host_variables(host), depth + 1))
@@ -289,9 +302,9 @@ class InventoryCLI(CLI):
             results = {}
             results[group.name] = {}
             if group.name != 'all':
-                results[group.name]['hosts'] = [h.name for h in sorted(group.hosts, key=attrgetter('name'))]
+                results[group.name]['hosts'] = [h.name for h in group.hosts]
             results[group.name]['children'] = []
-            for subgroup in sorted(group.child_groups, key=attrgetter('name')):
+            for subgroup in group.child_groups:
                 results[group.name]['children'].append(subgroup.name)
                 if subgroup.name not in seen:
                     results.update(format_group(subgroup))
@@ -329,14 +342,14 @@ class InventoryCLI(CLI):
 
             # subgroups
             results[group.name]['children'] = {}
-            for subgroup in sorted(group.child_groups, key=attrgetter('name')):
+            for subgroup in group.child_groups:
                 if subgroup.name != 'all':
                     results[group.name]['children'].update(format_group(subgroup))
 
             # hosts for group
             results[group.name]['hosts'] = {}
             if group.name != 'all':
-                for h in sorted(group.hosts, key=attrgetter('name')):
+                for h in group.hosts:
                     myvars = {}
                     if h.name not in seen:  # avoid defining host vars more than once
                         seen.append(h.name)
@@ -363,7 +376,7 @@ class InventoryCLI(CLI):
             results[group.name] = {}
 
             results[group.name]['children'] = []
-            for subgroup in sorted(group.child_groups, key=attrgetter('name')):
+            for subgroup in group.child_groups:
                 if subgroup.name == 'ungrouped' and not has_ungrouped:
                     continue
                 if group.name != 'all':
@@ -371,7 +384,7 @@ class InventoryCLI(CLI):
                 results.update(format_group(subgroup))
 
             if group.name != 'all':
-                for host in sorted(group.hosts, key=attrgetter('name')):
+                for host in group.hosts:
                     if host.name not in seen:
                         seen.add(host.name)
                         host_vars = self._get_host_variables(host=host)
@@ -394,3 +407,11 @@ class InventoryCLI(CLI):
         results = format_group(top)
 
         return results
+
+
+def main(args=None):
+    InventoryCLI.cli_executor(args)
+
+
+if __name__ == '__main__':
+    main()

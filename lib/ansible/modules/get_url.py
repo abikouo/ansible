@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Jan-Piet Mens <jpmens () gmail.com>
@@ -23,10 +22,26 @@ description:
      - HTTP redirects can redirect from HTTP to HTTPS so you should be sure that
        your proxy environment for both protocols is correct.
      - From Ansible 2.4 when run with C(--check), it will do a HEAD request to validate the URL but
-       will not download the entire file or verify it against hashes.
+       will not download the entire file or verify it against hashes and will report incorrect changed status.
      - For Windows targets, use the M(ansible.windows.win_get_url) module instead.
 version_added: '0.6'
 options:
+  ciphers:
+    description:
+      - SSL/TLS Ciphers to use for the request
+      - 'When a list is provided, all ciphers are joined in order with C(:)'
+      - See the L(OpenSSL Cipher List Format,https://www.openssl.org/docs/manmaster/man1/openssl-ciphers.html#CIPHER-LIST-FORMAT)
+        for more details.
+      - The available ciphers is dependent on the Python and OpenSSL/LibreSSL versions
+    type: list
+    elements: str
+    version_added: '2.14'
+  decompress:
+    description:
+      - Whether to attempt to decompress gzip content-encoded responses
+    type: bool
+    default: true
+    version_added: '2.14'
   url:
     description:
       - HTTP, HTTPS, or FTP URL in the form (http|https|ftp)://[user[:pass]]@host.domain[:port]/path
@@ -39,7 +54,8 @@ options:
         none provided, the base name of the URL on the remote server will be
         used. If a directory, C(force) has no effect.
       - If C(dest) is a directory, the file will always be downloaded
-        (regardless of the C(force) option), but replaced only if the contents changed..
+        (regardless of the C(force) and C(checksum) option), but
+        replaced only if the contents changed.
     type: path
     required: true
   tmp_dest:
@@ -47,20 +63,18 @@ options:
       - Absolute path of where temporary file is downloaded to.
       - When run on Ansible 2.5 or greater, path defaults to ansible's remote_tmp setting
       - When run on Ansible prior to 2.5, it defaults to C(TMPDIR), C(TEMP) or C(TMP) env variables or a platform specific value.
-      - U(https://docs.python.org/2/library/tempfile.html#tempfile.tempdir)
+      - U(https://docs.python.org/3/library/tempfile.html#tempfile.tempdir)
     type: path
     version_added: '2.1'
   force:
     description:
-      - If C(yes) and C(dest) is not a directory, will download the file every
-        time and replace the file if the contents change. If C(no), the file
+      - If C(true) and C(dest) is not a directory, will download the file every
+        time and replace the file if the contents change. If C(false), the file
         will only be downloaded if the destination does not exist. Generally
-        should be C(yes) only for small local files.
-      - Prior to 0.6, this module behaved as if C(yes) was the default.
-      - Alias C(thirsty) has been deprecated and will be removed in 2.13.
+        should be C(true) only for small local files.
+      - Prior to 0.6, this module behaved as if C(true) was the default.
     type: bool
     default: no
-    aliases: [ thirsty ]
     version_added: '0.7'
   backup:
     description:
@@ -69,16 +83,6 @@ options:
     type: bool
     default: no
     version_added: '2.1'
-  sha256sum:
-    description:
-      - If a SHA-256 checksum is passed to this parameter, the digest of the
-        destination file will be calculated after it is downloaded to ensure
-        its integrity and verify that the transfer completed successfully.
-        This option is deprecated and will be removed in version 2.14. Use
-        option C(checksum) instead.
-    default: ''
-    type: str
-    version_added: "1.3"
   checksum:
     description:
       - 'If a checksum is passed to this parameter, the digest of the
@@ -99,13 +103,13 @@ options:
     version_added: "2.0"
   use_proxy:
     description:
-      - if C(no), it will not use a proxy, even if one is defined in
+      - if C(false), it will not use a proxy, even if one is defined in
         an environment variable on the target hosts.
     type: bool
     default: yes
   validate_certs:
     description:
-      - If C(no), SSL certificates will not be validated.
+      - If C(false), SSL certificates will not be validated.
       - This should only be used on personally controlled sites using self-signed certificates.
     type: bool
     default: yes
@@ -165,6 +169,15 @@ options:
       - Header to identify as, generally appears in web server logs.
     type: str
     default: ansible-httpget
+  unredirected_headers:
+    description:
+      - A list of header names that will not be sent on subsequent redirected requests. This list is case
+        insensitive. By default all headers will be redirected. In some cases it may be beneficial to list
+        headers such as C(Authorization) here to avoid potential credential exposure.
+    default: []
+    type: list
+    elements: str
+    version_added: '2.12'
   use_gssapi:
     description:
       - Use GSSAPI to perform the authentication, typically this is for Kerberos or Kerberos through Negotiate
@@ -172,13 +185,30 @@ options:
       - Requires the Python library L(gssapi,https://github.com/pythongssapi/python-gssapi) to be installed.
       - Credentials for GSSAPI can be specified with I(url_username)/I(url_password) or with the GSSAPI env var
         C(KRB5CCNAME) that specified a custom Kerberos credential cache.
-      - NTLM authentication is C(not) supported even if the GSSAPI mech for NTLM has been installed.
+      - NTLM authentication is I(not) supported even if the GSSAPI mech for NTLM has been installed.
     type: bool
     default: no
     version_added: '2.11'
+  use_netrc:
+    description:
+      - Determining whether to use credentials from ``~/.netrc`` file
+      - By default .netrc is used with Basic authentication headers
+      - When set to False, .netrc credentials are ignored
+    type: bool
+    default: true
+    version_added: '2.14'
 # informational: requirements for nodes
 extends_documentation_fragment:
     - files
+    - action_common_attributes
+attributes:
+    check_mode:
+        details: the changed status will reflect comparison to an empty source file
+        support: partial
+    diff_mode:
+        support: none
+    platform:
+        platforms: posix
 notes:
      - For Windows targets, use the M(ansible.windows.win_get_url) module instead.
 seealso:
@@ -190,19 +220,19 @@ author:
 
 EXAMPLES = r'''
 - name: Download foo.conf
-  get_url:
+  ansible.builtin.get_url:
     url: http://example.com/path/file.conf
     dest: /etc/foo.conf
     mode: '0440'
 
 - name: Download file and force basic auth
-  get_url:
+  ansible.builtin.get_url:
     url: http://example.com/path/file.conf
     dest: /etc/foo.conf
     force_basic_auth: yes
 
 - name: Download file with custom HTTP headers
-  get_url:
+  ansible.builtin.get_url:
     url: http://example.com/path/file.conf
     dest: /etc/foo.conf
     headers:
@@ -210,31 +240,31 @@ EXAMPLES = r'''
       key2: two
 
 - name: Download file with check (sha256)
-  get_url:
+  ansible.builtin.get_url:
     url: http://example.com/path/file.conf
     dest: /etc/foo.conf
     checksum: sha256:b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c
 
 - name: Download file with check (md5)
-  get_url:
+  ansible.builtin.get_url:
     url: http://example.com/path/file.conf
     dest: /etc/foo.conf
     checksum: md5:66dffb5228a211e61d6d7ef4a86f5758
 
 - name: Download file with checksum url (sha256)
-  get_url:
+  ansible.builtin.get_url:
     url: http://example.com/path/file.conf
     dest: /etc/foo.conf
     checksum: sha256:http://example.com/path/sha256sum.txt
 
 - name: Download file from a file path
-  get_url:
+  ansible.builtin.get_url:
     url: file:///tmp/afile.txt
     dest: /tmp/afilecopy.txt
 
 - name: < Fetch file that requires authentication.
         username/password only available since 2.8, in older versions you need to use url_username/url_password
-  get_url:
+  ansible.builtin.get_url:
     url: http://example.com/path/file.conf
     dest: /etc/foo.conf
     username: bar
@@ -357,7 +387,8 @@ def url_filename(url):
     return fn
 
 
-def url_get(module, url, dest, use_proxy, last_mod_time, force, timeout=10, headers=None, tmp_dest='', method='GET'):
+def url_get(module, url, dest, use_proxy, last_mod_time, force, timeout=10, headers=None, tmp_dest='', method='GET', unredirected_headers=None,
+            decompress=True, ciphers=None, use_netrc=True):
     """
     Download data from the url and store in a temporary file.
 
@@ -365,7 +396,8 @@ def url_get(module, url, dest, use_proxy, last_mod_time, force, timeout=10, head
     """
 
     start = datetime.datetime.utcnow()
-    rsp, info = fetch_url(module, url, use_proxy=use_proxy, force=force, last_mod_time=last_mod_time, timeout=timeout, headers=headers, method=method)
+    rsp, info = fetch_url(module, url, use_proxy=use_proxy, force=force, last_mod_time=last_mod_time, timeout=timeout, headers=headers, method=method,
+                          unredirected_headers=unredirected_headers, decompress=decompress, ciphers=ciphers, use_netrc=use_netrc)
     elapsed = (datetime.datetime.utcnow() - start).seconds
 
     if info['status'] == 304:
@@ -445,11 +477,14 @@ def main():
         url=dict(type='str', required=True),
         dest=dict(type='path', required=True),
         backup=dict(type='bool', default=False),
-        sha256sum=dict(type='str', default=''),
         checksum=dict(type='str', default=''),
         timeout=dict(type='int', default=10),
         headers=dict(type='dict'),
         tmp_dest=dict(type='path'),
+        unredirected_headers=dict(type='list', elements='str', default=[]),
+        decompress=dict(type='bool', default=True),
+        ciphers=dict(type='list', elements='str'),
+        use_netrc=dict(type='bool', default=True),
     )
 
     module = AnsibleModule(
@@ -457,27 +492,21 @@ def main():
         argument_spec=argument_spec,
         add_file_common_args=True,
         supports_check_mode=True,
-        mutually_exclusive=[['checksum', 'sha256sum']],
     )
-
-    if module.params.get('thirsty'):
-        module.deprecate('The alias "thirsty" has been deprecated and will be removed, use "force" instead',
-                         version='2.13', collection_name='ansible.builtin')
-
-    if module.params.get('sha256sum'):
-        module.deprecate('The parameter "sha256sum" has been deprecated and will be removed, use "checksum" instead',
-                         version='2.14', collection_name='ansible.builtin')
 
     url = module.params['url']
     dest = module.params['dest']
     backup = module.params['backup']
     force = module.params['force']
-    sha256sum = module.params['sha256sum']
     checksum = module.params['checksum']
     use_proxy = module.params['use_proxy']
     timeout = module.params['timeout']
     headers = module.params['headers']
     tmp_dest = module.params['tmp_dest']
+    unredirected_headers = module.params['unredirected_headers']
+    decompress = module.params['decompress']
+    ciphers = module.params['ciphers']
+    use_netrc = module.params['use_netrc']
 
     result = dict(
         changed=False,
@@ -491,10 +520,6 @@ def main():
     dest_is_dir = os.path.isdir(dest)
     last_mod_time = None
 
-    # workaround for usage of deprecated sha256sum parameter
-    if sha256sum:
-        checksum = 'sha256:%s' % (sha256sum)
-
     # checksum specified, parse for algorithm and checksum
     if checksum:
         try:
@@ -505,20 +530,34 @@ def main():
         if is_url(checksum):
             checksum_url = checksum
             # download checksum file to checksum_tmpsrc
-            checksum_tmpsrc, checksum_info = url_get(module, checksum_url, dest, use_proxy, last_mod_time, force, timeout, headers, tmp_dest)
+            checksum_tmpsrc, checksum_info = url_get(module, checksum_url, dest, use_proxy, last_mod_time, force, timeout, headers, tmp_dest,
+                                                     unredirected_headers=unredirected_headers, ciphers=ciphers, use_netrc=use_netrc)
             with open(checksum_tmpsrc) as f:
                 lines = [line.rstrip('\n') for line in f]
             os.remove(checksum_tmpsrc)
             checksum_map = []
-            for line in lines:
-                parts = line.split(None, 1)
-                if len(parts) == 2:
-                    checksum_map.append((parts[0], parts[1]))
             filename = url_filename(url)
+            if len(lines) == 1 and len(lines[0].split()) == 1:
+                # Only a single line with a single string
+                # treat it as a checksum only file
+                checksum_map.append((lines[0], filename))
+            else:
+                # The assumption here is the file is in the format of
+                # checksum filename
+                for line in lines:
+                    # Split by one whitespace to keep the leading type char ' ' (whitespace) for text and '*' for binary
+                    parts = line.split(" ", 1)
+                    if len(parts) == 2:
+                        # Remove the leading type char, we expect
+                        if parts[1].startswith((" ", "*",)):
+                            parts[1] = parts[1][1:]
+
+                        # Append checksum and path without potential leading './'
+                        checksum_map.append((parts[0], parts[1].lstrip("./")))
 
             # Look through each line in the checksum file for a hash corresponding to
             # the filename in the url, returning the first hash that is found.
-            for cksum in (s for (s, f) in checksum_map if f.strip('./') == filename):
+            for cksum in (s for (s, f) in checksum_map if f == filename):
                 checksum = cksum
                 break
             else:
@@ -569,7 +608,8 @@ def main():
     # download to tmpsrc
     start = datetime.datetime.utcnow()
     method = 'HEAD' if module.check_mode else 'GET'
-    tmpsrc, info = url_get(module, url, dest, use_proxy, last_mod_time, force, timeout, headers, tmp_dest, method)
+    tmpsrc, info = url_get(module, url, dest, use_proxy, last_mod_time, force, timeout, headers, tmp_dest, method,
+                           unredirected_headers=unredirected_headers, decompress=decompress, use_netrc=use_netrc)
     result['elapsed'] = (datetime.datetime.utcnow() - start).seconds
     result['src'] = tmpsrc
 

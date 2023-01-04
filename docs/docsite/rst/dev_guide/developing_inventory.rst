@@ -7,10 +7,10 @@ Developing dynamic inventory
 Ansible can pull inventory information from dynamic sources, including cloud sources, by using the supplied :ref:`inventory plugins <inventory_plugins>`. For details about how to pull inventory information, see :ref:`dynamic_inventory`. If the source you want is not currently covered by existing plugins, you can create your own inventory plugin as with any other plugin type.
 
 In previous versions, you had to create a script or program that could output JSON in the correct format when invoked with the proper arguments.
-You can still use and write inventory scripts, as we ensured backwards compatibility via the :ref:`script inventory plugin <script_inventory>`
+You can still use and write inventory scripts, as we ensured backwards compatibility through the :ref:`script inventory plugin <script_inventory>`
 and there is no restriction on the programming language used.
 If you choose to write a script, however, you will need to implement some features yourself such as caching, configuration management, dynamic variable and group composition, and so on.
-If you use :ref:`inventory plugins <inventory_plugins>` instead, you can leverage the Ansible codebase and add these common features automatically.
+If you use :ref:`inventory plugins <inventory_plugins>` instead, you can use the Ansible codebase and add these common features automatically.
 
 .. contents:: Topics
    :local:
@@ -143,9 +143,9 @@ The base class does some minimal assignment for reuse in other methods.
 
        def parse(self, inventory, loader, path, cache=True):
 
-        self.loader = loader
-        self.inventory = inventory
-        self.templar = Templar(loader=loader)
+            self.loader = loader
+            self.inventory = inventory
+            self.templar = Templar(loader=loader)
 
 It is up to the plugin now to parse the provided inventory source and translate it into Ansible inventory.
 To facilitate this, the example below uses a few helper functions:
@@ -189,6 +189,26 @@ The specifics will vary depending on API and structure returned. Remember that i
 For examples on how to implement an inventory plugin, see the source code here:
 `lib/ansible/plugins/inventory <https://github.com/ansible/ansible/tree/devel/lib/ansible/plugins/inventory>`_.
 
+.. _inventory_object:
+
+inventory object
+^^^^^^^^^^^^^^^^
+
+The ``inventory`` object passed to ``parse`` has helpful methods for populating inventory.
+
+``add_group`` adds a group to inventory if it doesn't already exist. It takes the group name as the only positional argument.
+
+``add_child`` adds a group or host that exists in inventory to a parent group in inventory. It takes two positional arguments, the name of the parent group and the name of the child group or host.
+
+``add_host`` adds a host to inventory if it doesn't already exist, optionally to a specific group. It takes the host name as the first argument and accepts two optional keyword arguments, ``group`` and ``port``. ``group`` is the name of a group in inventory, and ``port`` is an integer.
+
+``set_variable`` adds a variable to a group or host in inventory. It takes three positional arguments: the name of the group or host, the name of the variable, and the value of the variable.
+
+To create groups and variables using Jinja2 expressions, see the section on implementing ``constructed`` features below.
+
+To see other inventory object methods, see the source code here:
+`lib/ansible/inventory/data.py <https://github.com/ansible/ansible/tree/devel/lib/ansible/inventory/data.py>`_.
+
 .. _inventory_plugin_caching:
 
 inventory cache
@@ -228,7 +248,7 @@ Before using the cache plugin, you must retrieve a unique cache key by using the
         self.load_cache_plugin()
         cache_key = self.get_cache_key(path)
 
-Now that you've enabled caching, loaded the correct plugin, and retrieved a unique cache key, you can set up the flow of data between the cache and your inventory using the ``cache`` parameter of the ``parse`` method. This value comes from the inventory manager and indicates whether the inventory is being refreshed (such as via ``--flush-cache`` or the meta task ``refresh_inventory``). Although the cache shouldn't be used to populate the inventory when being refreshed, the cache should be updated with the new inventory if the user has enabled caching. You can use ``self._cache`` like a dictionary. The following pattern allows refreshing the inventory to work in conjunction with caching.
+Now that you've enabled caching, loaded the correct plugin, and retrieved a unique cache key, you can set up the flow of data between the cache and your inventory using the ``cache`` parameter of the ``parse`` method. This value comes from the inventory manager and indicates whether the inventory is being refreshed (such as by the ``--flush-cache`` or the meta task ``refresh_inventory``). Although the cache shouldn't be used to populate the inventory when being refreshed, the cache should be updated with the new inventory if the user has enabled caching. You can use ``self._cache`` like a dictionary. The following pattern allows refreshing the inventory to work in conjunction with caching.
 
 .. code-block:: python
 
@@ -286,7 +306,19 @@ Inventory plugins can create host variables and groups from Jinja2 expressions a
 
         NAME = 'ns.coll.myplugin'
 
-The three main options from the ``constructed`` documentation fragment are ``compose``, ``keyed_groups``, and ``groups``. See the ``constructed`` inventory plugin for examples on using these. ``compose`` is a dictionary of variable names and Jinja2 expressions. Once a host is added to inventory and any initial variables have been set, call the method ``_set_composite_vars`` to add composed host variables. If this is done before adding ``keyed_groups`` and ``groups``, the group generation will be able to use the composed variables.
+There are three main options in the ``constructed`` documentation fragment:
+
+``compose`` creates variables using Jinja2 expressions. This is implemented by calling the ``_set_composite_vars`` method.
+``keyed_groups`` creates groups of hosts based on variable values. This is implemented by calling the ``_add_host_to_keyed_groups`` method.
+``groups`` creates groups based on Jinja2 conditionals. This is implemented by calling the ``_add_host_to_composed_groups`` method.
+
+Each method should be called for every host added to inventory. Three positional arguments are required: the constructed option, a dictionary of variables, and a host name. Calling the method ``_set_composite_vars`` first will allow ``keyed_groups`` and ``groups`` to use the composed variables.
+
+By default, undefined variables are ignored. This is permitted by default for ``compose`` so you can make the variable definitions depend on variables that will be populated later in a play from other sources. For groups, it allows using variables that are not always present without having to use the ``default`` filter. To support configuring undefined variables to be an error, pass the constructed option ``strict`` to each of the methods as a keyword argument.
+
+``keyed_groups`` and ``groups`` use any variables already associated with the host (for example, from an earlier inventory source). ``_add_host_to_keyed_groups`` and ``add_host_to_composed_groups`` can turn this off by passing the keyword argument ``fetch_hostvars``.
+
+Here is an example using all three methods:
 
 .. code-block:: python
 
@@ -296,14 +328,12 @@ The three main options from the ``constructed`` documentation fragment are ``com
        for var_name, var_value in host_vars.items():
            self.inventory.set_variable(hostname, var_name, var_value)
 
-       # Determines if composed variables or groups using nonexistent variables is an error
        strict = self.get_option('strict')
 
        # Add variables created by the user's Jinja2 expressions to the host
        self._set_composite_vars(self.get_option('compose'), host_vars, hostname, strict=True)
 
-       # The following two methods combine the provided variables dictionary with the latest host variables
-       # Using these methods after _set_composite_vars() allows groups to be created with the composed variables
+       # Create user-defined groups using variables and Jinja2 conditionals
        self._add_host_to_composed_groups(self.get_option('groups'), host_vars, hostname, strict=strict)
        self._add_host_to_keyed_groups(self.get_option('keyed_groups'), host_vars, hostname, strict=strict)
 
@@ -349,7 +379,7 @@ From Ansible 2.5 onwards, we include the :ref:`auto inventory plugin <auto_inven
 Inventory scripts
 =================
 
-Even though we now have inventory plugins, we still support inventory scripts, not only for backwards compatibility but also to allow users to leverage other programming languages.
+Even though we now have inventory plugins, we still support inventory scripts, not only for backwards compatibility but also to allow users to use other programming languages.
 
 
 .. _inventory_script_conventions:
@@ -360,8 +390,10 @@ Inventory script conventions
 Inventory scripts must accept the ``--list`` and ``--host <hostname>`` arguments. Although other arguments are allowed, Ansible will not use them.
 Such arguments might still be useful for executing the scripts directly.
 
-When the script is called with the single argument ``--list``, the script must output to stdout a JSON object that contains all the groups to be managed. Each group's value should be either an object containing a list of each host, any child groups, and potential group variables, or simply a list of hosts::
+When the script is called with the single argument ``--list``, the script must output to stdout a JSON object that contains all the groups to be managed. Each group's value should be either an object containing a list of each host, any child groups, and potential group variables, or simply a list of hosts:
 
+
+.. code-block:: json
 
     {
         "group001": {
@@ -383,12 +415,13 @@ When the script is called with the single argument ``--list``, the script must o
 
 If any of the elements of a group are empty, they may be omitted from the output.
 
-When called with the argument ``--host <hostname>`` (where <hostname> is a host from above), the script must print a JSON object, either empty or containing variables to make them available to templates and playbooks. For example::
+When called with the argument ``--host <hostname>`` (where <hostname> is a host from above), the script must print a JSON object, either empty or containing variables to make them available to templates and playbooks. For example:
 
+.. code-block:: json
 
     {
         "VAR001": "VALUE",
-        "VAR002": "VALUE",
+        "VAR002": "VALUE"
     }
 
 Printing variables is optional. If the script does not print variables, it should print an empty JSON object.
@@ -404,7 +437,9 @@ The stock inventory script system mentioned above works for all versions of Ansi
 
 To avoid this inefficiency, if the inventory script returns a top-level element called "_meta", it is possible to return all the host variables in a single script execution. When this meta element contains a value for "hostvars", the inventory script will not be invoked with ``--host`` for each host. This behavior results in a significant performance increase for large numbers of hosts.
 
-The data to be added to the top-level JSON object looks like this::
+The data to be added to the top-level JSON object looks like this:
+
+.. code-block:: text
 
     {
 
@@ -424,7 +459,9 @@ The data to be added to the top-level JSON object looks like this::
     }
 
 To satisfy the requirements of using ``_meta``, to prevent ansible from calling your inventory with ``--host`` you must at least populate ``_meta`` with an empty ``hostvars`` object.
-For example::
+For example:
+
+.. code-block:: text
 
     {
 
@@ -469,9 +506,9 @@ An easy way to see how this should look is using :ref:`ansible-inventory`, which
        Get started with developing a module
    :ref:`developing_plugins`
        How to develop plugins
-   `Ansible Tower <https://www.ansible.com/products/tower>`_
+   `AWX <https://github.com/ansible/awx>`_
        REST API endpoint and GUI for Ansible, syncs with dynamic inventory
    `Development Mailing List <https://groups.google.com/group/ansible-devel>`_
        Mailing list for development topics
-   `irc.freenode.net <http://irc.freenode.net>`_
-       #ansible IRC chat channel
+   :ref:`communication_irc`
+       How to join Ansible chat channels

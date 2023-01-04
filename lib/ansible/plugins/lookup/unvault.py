@@ -19,7 +19,7 @@ DOCUMENTATION = """
 """
 
 EXAMPLES = """
-- debug: msg="the value of foo.txt is {{lookup('unvault', '/etc/foo.txt')|to_string }}"
+- ansible.builtin.debug: msg="the value of foo.txt is {{ lookup('ansible.builtin.unvault', '/etc/foo.txt') | string | trim }}"
 """
 
 RETURN = """
@@ -42,9 +42,9 @@ class LookupModule(LookupBase):
 
     def run(self, terms, variables=None, **kwargs):
 
-        self.set_options(direct=kwargs)
-
         ret = []
+
+        self.set_options(var_options=variables, direct=kwargs)
 
         for term in terms:
             display.debug("Unvault lookup term: %s" % term)

@@ -1,6 +1,10 @@
 Microsoft Azure Guide
 =====================
 
+.. important::
+
+  Red Hat Ansible Automation Platform will soon be available on Microsoft Azure. `Sign up to preview the experience <https://www.redhat.com/en/engage/ansible-microsoft-azure-e-202110220735>`_.
+  
 Ansible includes a suite of modules for interacting with Azure Resource Manager, giving you the tools to easily create
 and orchestrate infrastructure on the Microsoft Azure Cloud.
 
@@ -65,7 +69,7 @@ To create an Active Directory username/password:
 Providing Credentials to Azure Modules
 ......................................
 
-The modules offer several ways to provide your credentials. For a CI/CD tool such as Ansible Tower or Jenkins, you will
+The modules offer several ways to provide your credentials. For a CI/CD tool such as Ansible AWX or Jenkins, you will
 most likely want to use environment variables. For local development you may wish to store your credentials in a file
 within your home directory. And of course, you can always pass credentials as parameters to a task within a playbook. The
 order of precedence is parameters, then environment variables, and finally a file found in your home directory.
@@ -73,20 +77,20 @@ order of precedence is parameters, then environment variables, and finally a fil
 Using Environment Variables
 ```````````````````````````
 
-To pass service principal credentials via the environment, define the following variables:
+To pass service principal credentials through the environment, define the following variables:
 
 * AZURE_CLIENT_ID
 * AZURE_SECRET
 * AZURE_SUBSCRIPTION_ID
 * AZURE_TENANT
 
-To pass Active Directory username/password via the environment, define the following variables:
+To pass Active Directory username/password through the environment, define the following variables:
 
 * AZURE_AD_USER
 * AZURE_PASSWORD
 * AZURE_SUBSCRIPTION_ID
 
-To pass Active Directory username/password in ADFS via the environment, define the following variables:
+To pass Active Directory username/password in ADFS through the environment, define the following variables:
 
 * AZURE_AD_USER
 * AZURE_PASSWORD
@@ -286,14 +290,14 @@ Dynamic Inventory Script
 
 If you are not familiar with Ansible's dynamic inventory scripts, check out :ref:`Intro to Dynamic Inventory <intro_dynamic_inventory>`.
 
-The Azure Resource Manager inventory script is called  `azure_rm.py  <https://raw.githubusercontent.com/ansible-collections/community.general/main/scripts/inventory/azure_rm.py>`_. It authenticates with the Azure API exactly the same as the
+The Azure Resource Manager inventory script is called  `azure_rm.py  <https://raw.githubusercontent.com/ansible-community/contrib-scripts/main/inventory/azure_rm.py>`_. It authenticates with the Azure API exactly the same as the
 Azure modules, which means you will either define the same environment variables described above in `Using Environment Variables`_,
 create a ``$HOME/.azure/credentials`` file (also described above in `Storing in a File`_), or pass command line parameters. To see available command
 line options execute the following:
 
 .. code-block:: bash
 
-    $ wget https://raw.githubusercontent.com/ansible-collections/community.general/main/scripts/inventory/azure_rm.py
+    $ wget https://raw.githubusercontent.com/ansible-community/contrib-scripts/main/inventory/azure_rm.py
     $ ./azure_rm.py --help
 
 As with all dynamic inventory scripts, the script can be executed directly, passed as a parameter to the ansible command,
@@ -397,7 +401,7 @@ If you don't need the powerstate, you can improve performance by turning off pow
 * AZURE_INCLUDE_POWERSTATE=no
 
 A sample azure_rm.ini file is included along with the inventory script in
-`here <https://raw.githubusercontent.com/ansible-collections/community.general/main/scripts/inventory/azure_rm.ini>`_.
+`here <https://raw.githubusercontent.com/ansible-community/contrib-scripts/main/inventory/azure_rm.ini>`_.
 An .ini file will contain the following:
 
 .. code-block:: ini
@@ -432,7 +436,7 @@ Here are some examples using the inventory script:
 .. code-block:: bash
 
     # Download inventory script
-    $ wget https://raw.githubusercontent.com/ansible-collections/community.general/main/scripts/inventory/azure_rm.py
+    $ wget https://raw.githubusercontent.com/ansible-community/contrib-scripts/main/inventory/azure_rm.py
 
     # Execute /bin/uname on all instances in the Testing resource group
     $ ansible -i azure_rm.py Testing -m shell -a "/bin/uname -a"
@@ -456,7 +460,7 @@ Here is a simple playbook to exercise the Azure inventory script:
     - name: Test the inventory script
       hosts: azure
       connection: local
-      gather_facts: no
+      gather_facts: false
       tasks:
         - debug:
             msg: "{{ inventory_hostname }} has powerstate {{ powerstate }}"
@@ -474,7 +478,7 @@ Disabling certificate validation on Azure endpoints
 When an HTTPS proxy is present, or when using Azure Stack, it may be necessary to disable certificate validation for
 Azure endpoints in the Azure modules. This is not a recommended security practice, but may be necessary when the system
 CA store cannot be altered to include the necessary CA certificate. Certificate validation can be controlled by setting
-the "cert_validation_mode" value in a credential profile, via the "AZURE_CERT_VALIDATION_MODE" environment variable, or
+the "cert_validation_mode" value in a credential profile, through the "AZURE_CERT_VALIDATION_MODE" environment variable, or
 by passing the "cert_validation_mode" argument to any Azure module. The default value is "validate"; setting the value
 to "ignore" will prevent all certificate validation. The module argument takes precedence over a credential profile value,
 which takes precedence over the environment value.

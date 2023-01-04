@@ -21,12 +21,14 @@ __metaclass__ = type
 import datetime
 import time
 
+import ansible.module_utils.compat.typing as t
+
 from ansible.module_utils.facts.collector import BaseFactCollector
 
 
 class DateTimeFactCollector(BaseFactCollector):
     name = 'date_time'
-    _fact_ids = set()
+    _fact_ids = set()  # type: t.Set[str]
 
     def collect(self, module=None, collected_facts=None):
         facts_dict = {}
@@ -47,8 +49,13 @@ class DateTimeFactCollector(BaseFactCollector):
         date_time_facts['minute'] = now.strftime('%M')
         date_time_facts['second'] = now.strftime('%S')
         date_time_facts['epoch'] = now.strftime('%s')
+        # epoch returns float or string in some non-linux environments
         if date_time_facts['epoch'] == '' or date_time_facts['epoch'][0] == '%':
             date_time_facts['epoch'] = str(int(epoch_ts))
+        # epoch_int always returns integer format of epoch
+        date_time_facts['epoch_int'] = str(int(now.strftime('%s')))
+        if date_time_facts['epoch_int'] == '' or date_time_facts['epoch_int'][0] == '%':
+            date_time_facts['epoch_int'] = str(int(epoch_ts))
         date_time_facts['date'] = now.strftime('%Y-%m-%d')
         date_time_facts['time'] = now.strftime('%H:%M:%S')
         date_time_facts['iso8601_micro'] = utcnow.strftime("%Y-%m-%dT%H:%M:%S.%fZ")

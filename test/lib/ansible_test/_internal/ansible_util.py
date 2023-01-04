@@ -1,11 +1,9 @@
 """Miscellaneous utility functions and classes specific to ansible cli tools."""
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import json
 import os
-
-from . import types as t
+import typing as t
 
 from .constants import (
     SOFT_RLIMIT_NOFILE,
@@ -17,21 +15,21 @@ from .io import (
 
 from .util import (
     common_environment,
-    display,
-    find_python,
     ApplicationError,
     ANSIBLE_LIB_ROOT,
     ANSIBLE_TEST_DATA_ROOT,
     ANSIBLE_BIN_PATH,
     ANSIBLE_SOURCE_ROOT,
+    ANSIBLE_TEST_TOOLS_ROOT,
     get_ansible_version,
+    raw_command,
 )
 
 from .util_common import (
     create_temp_dir,
-    run_command,
     ResultType,
-    intercept_command,
+    intercept_python,
+    get_injector_path,
 )
 
 from .config import (
@@ -45,16 +43,38 @@ from .data import (
     data_context,
 )
 
-CHECK_YAML_VERSIONS = {}
+from .python_requirements import (
+    install_requirements,
+)
+
+from .host_configs import (
+    PythonConfig,
+)
+
+from .thread import (
+    mutex,
+)
 
 
-def ansible_environment(args, color=True, ansible_config=None):
-    """
-    :type args: CommonConfig
-    :type color: bool
-    :type ansible_config: str | None
-    :rtype: dict[str, str]
-    """
+def parse_inventory(args: EnvironmentConfig, inventory_path: str) -> dict[str, t.Any]:
+    """Return a dict parsed from the given inventory file."""
+    cmd = ['ansible-inventory', '-i', inventory_path, '--list']
+    env = ansible_environment(args)
+    inventory = json.loads(intercept_python(args, args.controller_python, cmd, env, capture=True, always=True)[0])
+    return inventory
+
+
+def get_hosts(inventory: dict[str, t.Any], group_name: str) -> dict[str, dict[str, t.Any]]:
+    """Return a dict of hosts from the specified group in the given inventory."""
+    hostvars = inventory.get('_meta', {}).get('hostvars', {})
+    group = inventory.get(group_name, {})
+    host_names = group.get('hosts', [])
+    hosts = dict((name, hostvars.get(name, {})) for name in host_names)
+    return hosts
+
+
+def ansible_environment(args: CommonConfig, color: bool = True, ansible_config: t.Optional[str] = None) -> dict[str, str]:
+    """Return a dictionary of environment variables to use when running Ansible commands."""
     env = common_environment()
     path = env['PATH']
 
@@ -80,7 +100,6 @@ def ansible_environment(args, color=True, ansible_config=None):
         ANSIBLE_CONFIG=ansible_config,
         ANSIBLE_LIBRARY='/dev/null',
         ANSIBLE_DEVEL_WARNING='false',  # Don't show warnings that CI is running devel
-        ANSIBLE_CONTROLLER_PYTHON_WARNING='false',  # Don't show warnings in CI for old controller Python
         PYTHONPATH=get_ansible_python_path(args),
         PAGER='/bin/cat',
         PATH=path,
@@ -96,7 +115,7 @@ def ansible_environment(args, color=True, ansible_config=None):
         # ansible-connection only requires the injector for code coverage
         # the correct python interpreter is already selected using the sys.executable used to invoke ansible
         ansible.update(dict(
-            ANSIBLE_CONNECTION_PATH=os.path.join(ANSIBLE_TEST_DATA_ROOT, 'injector', 'ansible-connection'),
+            ANSIBLE_CONNECTION_PATH=os.path.join(get_injector_path(), 'ansible-connection'),
         ))
 
     if isinstance(args, PosixIntegrationConfig):
@@ -123,7 +142,7 @@ def ansible_environment(args, color=True, ansible_config=None):
     return env
 
 
-def configure_plugin_paths(args):  # type: (CommonConfig) -> t.Dict[str, str]
+def configure_plugin_paths(args: CommonConfig) -> dict[str, str]:
     """Return environment variables with paths to plugins relevant for the current command."""
     if not isinstance(args, IntegrationConfig):
         return {}
@@ -177,13 +196,14 @@ def configure_plugin_paths(args):  # type: (CommonConfig) -> t.Dict[str, str]
     return env
 
 
-def get_ansible_python_path(args):  # type: (CommonConfig) -> str
+@mutex
+def get_ansible_python_path(args: CommonConfig) -> str:
     """
     Return a directory usable for PYTHONPATH, containing only the ansible package.
     If a temporary directory is required, it will be cached for the lifetime of the process and cleaned up at exit.
     """
     try:
-        return get_ansible_python_path.python_path
+        return get_ansible_python_path.python_path  # type: ignore[attr-defined]
     except AttributeError:
         pass
 
@@ -201,12 +221,12 @@ def get_ansible_python_path(args):  # type: (CommonConfig) -> str
     if not args.explain:
         generate_egg_info(python_path)
 
-    get_ansible_python_path.python_path = python_path
+    get_ansible_python_path.python_path = python_path  # type: ignore[attr-defined]
 
     return python_path
 
 
-def generate_egg_info(path):  # type: (str) -> None
+def generate_egg_info(path: str) -> None:
     """Generate an egg-info in the specified base directory."""
     # minimal PKG-INFO stub following the format defined in PEP 241
     # required for older setuptools versions to avoid a traceback when importing pkg_resources from packages like cryptography
@@ -230,60 +250,25 @@ License: GPLv3+
     write_text_file(pkg_info_path, pkg_info.lstrip(), create_directories=True)
 
 
-def check_pyyaml(args, version, required=True, quiet=False):
-    """
-    :type args: EnvironmentConfig
-    :type version: str
-    :type required: bool
-    :type quiet: bool
-    """
-    try:
-        return CHECK_YAML_VERSIONS[version]
-    except KeyError:
-        pass
-
-    python = find_python(version)
-    stdout, _dummy = run_command(args, [python, os.path.join(ANSIBLE_TEST_DATA_ROOT, 'yamlcheck.py')],
-                                 capture=True, always=True)
-
-    result = json.loads(stdout)
-
-    yaml = result['yaml']
-    cloader = result['cloader']
-
-    if yaml or required:
-        # results are cached only if pyyaml is required or present
-        # it is assumed that tests will not uninstall/re-install pyyaml -- if they do, those changes will go undetected
-        CHECK_YAML_VERSIONS[version] = result
-
-    if not quiet:
-        if not yaml and required:
-            display.warning('PyYAML is not installed for interpreter: %s' % python)
-        elif not cloader:
-            display.warning('PyYAML will be slow due to installation without libyaml support for interpreter: %s' % python)
-
-    return result
-
-
 class CollectionDetail:
     """Collection detail."""
-    def __init__(self):  # type: () -> None
-        self.version = None  # type: t.Optional[str]
+    def __init__(self) -> None:
+        self.version: t.Optional[str] = None
 
 
 class CollectionDetailError(ApplicationError):
     """An error occurred retrieving collection detail."""
-    def __init__(self, reason):  # type: (str) -> None
-        super(CollectionDetailError, self).__init__('Error collecting collection detail: %s' % reason)
+    def __init__(self, reason: str) -> None:
+        super().__init__('Error collecting collection detail: %s' % reason)
         self.reason = reason
 
 
-def get_collection_detail(args, python):  # type: (EnvironmentConfig, str) -> CollectionDetail
+def get_collection_detail(python: PythonConfig) -> CollectionDetail:
     """Return collection detail."""
     collection = data_context().content.collection
     directory = os.path.join(collection.root, collection.directory)
 
-    stdout = run_command(args, [python, os.path.join(ANSIBLE_TEST_DATA_ROOT, 'collection_detail.py'), directory], capture=True, always=True)[0]
+    stdout = raw_command([python.path, os.path.join(ANSIBLE_TEST_TOOLS_ROOT, 'collection_detail.py'), directory], capture=True)[0]
     result = json.loads(stdout)
     error = result.get('error')
 
@@ -298,13 +283,23 @@ def get_collection_detail(args, python):  # type: (EnvironmentConfig, str) -> Co
     return detail
 
 
-def run_playbook(args, inventory_path, playbook, run_playbook_vars):  # type: (CommonConfig, str, str, t.Dict[str, t.Any]) -> None
+def run_playbook(
+        args: EnvironmentConfig,
+        inventory_path: str,
+        playbook: str,
+        capture: bool,
+        variables: t.Optional[dict[str, t.Any]] = None,
+) -> None:
     """Run the specified playbook using the given inventory file and playbook variables."""
     playbook_path = os.path.join(ANSIBLE_TEST_DATA_ROOT, 'playbooks', playbook)
-    command = ['ansible-playbook', '-i', inventory_path, playbook_path, '-e', json.dumps(run_playbook_vars)]
+    cmd = ['ansible-playbook', '-i', inventory_path, playbook_path]
+
+    if variables:
+        cmd.extend(['-e', json.dumps(variables)])
 
     if args.verbosity:
-        command.append('-%s' % ('v' * args.verbosity))
+        cmd.append('-%s' % ('v' * args.verbosity))
 
+    install_requirements(args, args.controller_python, ansible=True)  # run_playbook()
     env = ansible_environment(args)
-    intercept_command(args, command, '', env, disable_coverage=True)
+    intercept_python(args, args.controller_python, cmd, env, capture=capture)

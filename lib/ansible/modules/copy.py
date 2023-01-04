@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>
@@ -56,12 +55,10 @@ options:
   force:
     description:
     - Influence whether the remote file must always be replaced.
-    - If C(yes), the remote file will be replaced when contents are different than the source.
-    - If C(no), the file will only be transferred if the destination does not exist.
-    - Alias C(thirsty) has been deprecated and will be removed in 2.13.
+    - If C(true), the remote file will be replaced when contents are different than the source.
+    - If C(false), the file will only be transferred if the destination does not exist.
     type: bool
     default: yes
-    aliases: [ thirsty ]
     version_added: '1.1'
   mode:
     description:
@@ -90,8 +87,8 @@ options:
   remote_src:
     description:
     - Influence whether C(src) needs to be transferred or already is present remotely.
-    - If C(no), it will search for C(src) on the controller node.
-    - If C(yes) it will search for C(src) on the managed (remote) node.
+    - If C(false), it will search for C(src) on the controller node.
+    - If C(true) it will search for C(src) on the managed (remote) node.
     - C(remote_src) supports recursive copying as of version 2.8.
     - C(remote_src) only works with C(mode=preserve) as of version 2.6.
     - Autodecryption of files does not work when C(remote_src=yes).
@@ -118,22 +115,42 @@ options:
     type: str
     version_added: '2.5'
 extends_documentation_fragment:
-- decrypt
-- files
-- validate
+    - decrypt
+    - files
+    - validate
+    - action_common_attributes
+    - action_common_attributes.files
+    - action_common_attributes.flow
 notes:
-- The M(ansible.builtin.copy) module recursively copy facility does not scale to lots (>hundreds) of files.
-- Supports C(check_mode).
+    - The M(ansible.builtin.copy) module recursively copy facility does not scale to lots (>hundreds) of files.
 seealso:
-- module: ansible.builtin.assemble
-- module: ansible.builtin.fetch
-- module: ansible.builtin.file
-- module: ansible.builtin.template
-- module: ansible.posix.synchronize
-- module: ansible.windows.win_copy
+    - module: ansible.builtin.assemble
+    - module: ansible.builtin.fetch
+    - module: ansible.builtin.file
+    - module: ansible.builtin.template
+    - module: ansible.posix.synchronize
+    - module: ansible.windows.win_copy
 author:
-- Ansible Core Team
-- Michael DeHaan
+    - Ansible Core Team
+    - Michael DeHaan
+attributes:
+  action:
+    support: full
+  async:
+    support: none
+  bypass_host_loop:
+    support: none
+  check_mode:
+    support: full
+  diff_mode:
+    support: full
+  platform:
+    platforms: posix
+  safe_file_operations:
+      support: full
+  vault:
+    support: full
+    version_added: '2.2'
 '''
 
 EXAMPLES = r'''
@@ -251,7 +268,7 @@ mode:
     description: Permissions of the target, after execution.
     returned: success
     type: str
-    sample: 0644
+    sample: "0644"
 size:
     description: Size of the target, after execution.
     returned: success
@@ -276,9 +293,10 @@ import stat
 import tempfile
 import traceback
 
+from ansible.module_utils._text import to_bytes, to_native
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.process import get_bin_path
-from ansible.module_utils._text import to_bytes, to_native
+from ansible.module_utils.common.locale import get_best_parsable_locale
 from ansible.module_utils.six import PY3
 
 
@@ -300,7 +318,8 @@ def clear_facls(path):
     # FIXME "setfacl -b" is available on Linux and FreeBSD. There is "setfacl -D e" on z/OS. Others?
     acl_command = [setfacl, '-b', path]
     b_acl_command = [to_bytes(x) for x in acl_command]
-    rc, out, err = module.run_command(b_acl_command, environ_update=dict(LANG='C', LC_ALL='C', LC_MESSAGES='C'))
+    locale = get_best_parsable_locale(module)
+    rc, out, err = module.run_command(b_acl_command, environ_update=dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale))
     if rc != 0:
         raise RuntimeError('Error running "{0}": stdout: "{1}"; stderr: "{2}"'.format(' '.join(b_acl_command), out, err))
 
@@ -450,7 +469,7 @@ def copy_left_only(src, dest, module):
             b_dest_item_path = to_bytes(dest_item_path, errors='surrogate_or_strict')
 
             if os.path.islink(b_src_item_path) and os.path.isdir(b_src_item_path) and local_follow is True:
-                shutil.copytree(b_src_item_path, b_dest_item_path, symlinks=not(local_follow))
+                shutil.copytree(b_src_item_path, b_dest_item_path, symlinks=not local_follow)
                 chown_recursive(b_dest_item_path, module)
 
             if os.path.islink(b_src_item_path) and os.path.isdir(b_src_item_path) and local_follow is False:
@@ -478,7 +497,7 @@ def copy_left_only(src, dest, module):
                     module.set_group_if_different(b_dest_item_path, group, False)
 
             if not os.path.islink(b_src_item_path) and os.path.isdir(b_src_item_path):
-                shutil.copytree(b_src_item_path, b_dest_item_path, symlinks=not(local_follow))
+                shutil.copytree(b_src_item_path, b_dest_item_path, symlinks=not local_follow)
                 chown_recursive(b_dest_item_path, module)
 
             changed = True
@@ -499,7 +518,7 @@ def copy_common_dirs(src, dest, module):
             changed = True
 
         # recurse into subdirectory
-        changed = changed or copy_common_dirs(os.path.join(src, item), os.path.join(dest, item), module)
+        changed = copy_common_dirs(os.path.join(src, item), os.path.join(dest, item), module) or changed
     return changed
 
 
@@ -515,7 +534,7 @@ def main():
             content=dict(type='str', no_log=True),
             dest=dict(type='path', required=True),
             backup=dict(type='bool', default=False),
-            force=dict(type='bool', default=True, aliases=['thirsty']),
+            force=dict(type='bool', default=True),
             validate=dict(type='str'),
             directory_mode=dict(type='raw'),
             remote_src=dict(type='bool'),
@@ -526,10 +545,6 @@ def main():
         add_file_common_args=True,
         supports_check_mode=True,
     )
-
-    if module.params.get('thirsty'):
-        module.deprecate('The alias "thirsty" has been deprecated and will be removed, use "force" instead',
-                         version='2.13', collection_name='ansible.builtin')
 
     src = module.params['src']
     b_src = to_bytes(src, errors='surrogate_or_strict')
@@ -561,23 +576,24 @@ def main():
         module.params['mode'] = '0%03o' % stat.S_IMODE(os.stat(b_src).st_mode)
     mode = module.params['mode']
 
+    changed = False
+
     checksum_dest = None
+    checksum_src = None
+    md5sum_src = None
 
     if os.path.isfile(src):
-        checksum_src = module.sha1(src)
-    else:
-        checksum_src = None
-
-    # Backwards compat only.  This will be None in FIPS mode
-    try:
-        if os.path.isfile(src):
+        try:
+            checksum_src = module.sha1(src)
+        except (OSError, IOError) as e:
+            module.warn("Unable to calculate src checksum, assuming change: %s" % to_native(e))
+        try:
+            # Backwards compat only.  This will be None in FIPS mode
             md5sum_src = module.md5(src)
-        else:
-            md5sum_src = None
-    except ValueError:
-        md5sum_src = None
-
-    changed = False
+        except ValueError:
+            pass
+    elif remote_src and not os.path.isdir(src):
+        module.fail_json("Cannot copy invalid source '%s': not a file" % to_native(src))
 
     if checksum and checksum_src != checksum:
         module.fail_json(
@@ -601,6 +617,7 @@ def main():
                 module.fail_json(**e.results)
 
             os.makedirs(b_dirname)
+            changed = True
             directory_args = module.load_file_common_arguments(module.params)
             directory_mode = module.params["directory_mode"]
             if directory_mode is not None:
@@ -642,6 +659,7 @@ def main():
 
     backup_file = None
     if checksum_src != checksum_dest or os.path.islink(b_dest):
+
         if not module.check_mode:
             try:
                 if backup:
@@ -665,8 +683,10 @@ def main():
                     (rc, out, err) = module.run_command(validate % src)
                     if rc != 0:
                         module.fail_json(msg="failed to validate", exit_status=rc, stdout=out, stderr=err)
+
                 b_mysrc = b_src
                 if remote_src and os.path.isfile(b_src):
+
                     _, b_mysrc = tempfile.mkstemp(dir=os.path.dirname(b_dest))
 
                     shutil.copyfile(b_src, b_mysrc)
@@ -686,6 +706,7 @@ def main():
                         # assume unwanted ACLs by default
                         src_has_acls = True
 
+                # at this point we should always have tmp file
                 module.atomic_move(b_mysrc, dest, unsafe_writes=module.params['unsafe_writes'])
 
                 if PY3 and hasattr(os, 'listxattr') and platform.system() == 'Linux' and not remote_src:
@@ -729,8 +750,6 @@ def main():
             except (IOError, OSError):
                 module.fail_json(msg="failed to copy: %s to %s" % (src, dest), traceback=traceback.format_exc())
         changed = True
-    else:
-        changed = False
 
     # If neither have checksums, both src and dest are directories.
     if checksum_src is None and checksum_dest is None:
@@ -751,7 +770,7 @@ def main():
                 b_dest = to_bytes(os.path.join(b_dest, b_basename), errors='surrogate_or_strict')
                 b_src = to_bytes(os.path.join(module.params['src'], ""), errors='surrogate_or_strict')
                 if not module.check_mode:
-                    shutil.copytree(b_src, b_dest, symlinks=not(local_follow))
+                    shutil.copytree(b_src, b_dest, symlinks=not local_follow)
                 chown_recursive(dest, module)
                 changed = True
 
@@ -760,7 +779,7 @@ def main():
                 b_dest = to_bytes(os.path.join(b_dest, b_basename), errors='surrogate_or_strict')
                 b_src = to_bytes(os.path.join(module.params['src'], ""), errors='surrogate_or_strict')
                 if not module.check_mode and not os.path.exists(b_dest):
-                    shutil.copytree(b_src, b_dest, symlinks=not(local_follow))
+                    shutil.copytree(b_src, b_dest, symlinks=not local_follow)
                     changed = True
                     chown_recursive(dest, module)
                 if module.check_mode and not os.path.exists(b_dest):
@@ -778,13 +797,12 @@ def main():
                 b_dest = to_bytes(os.path.join(b_dest, b_basename), errors='surrogate_or_strict')
                 if not module.check_mode and not os.path.exists(b_dest):
                     os.makedirs(b_dest)
+                    changed = True
                     b_src = to_bytes(os.path.join(module.params['src'], ""), errors='surrogate_or_strict')
                     diff_files_changed = copy_diff_files(b_src, b_dest, module)
                     left_only_changed = copy_left_only(b_src, b_dest, module)
                     common_dirs_changed = copy_common_dirs(b_src, b_dest, module)
                     owner_group_changed = chown_recursive(b_dest, module)
-                    if diff_files_changed or left_only_changed or common_dirs_changed or owner_group_changed:
-                        changed = True
                 if module.check_mode and not os.path.exists(b_dest):
                     changed = True
 

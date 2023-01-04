@@ -14,7 +14,7 @@ write plugins, and you can plug in inventory data from external data sources.  T
 gives a basic overview and examples of the Ansible execution and playbook API.
 
 If you would like to use Ansible programmatically from a language other than Python, trigger events asynchronously,
-or have access control and logging demands, please see the `Ansible Tower documentation <https://docs.ansible.com/ansible-tower/>`_.
+or have access control and logging demands, please see the `AWX project <https://github.com/ansible/awx/>`_.
 
 .. note:: Because Ansible relies on forking processes, this API is not thread safe.
 
@@ -28,7 +28,7 @@ This example is a simple demonstration that shows how to minimally run a couple 
 .. literalinclude:: ../../../../examples/scripts/uptime.py
    :language: python
 
-.. note:: Ansible emits warnings and errors via the display object, which prints directly to stdout, stderr and the Ansible log.
+.. note:: Ansible emits warnings and errors through the display object, which prints directly to stdout, stderr and the Ansible log.
 
 The source code for the ``ansible``
 command line tools (``lib/ansible/cli/``) is `available on GitHub <https://github.com/ansible/ansible/tree/devel/lib/ansible/cli>`_.
@@ -43,5 +43,5 @@ command line tools (``lib/ansible/cli/``) is `available on GitHub <https://githu
        How to develop plugins
    `Development Mailing List <https://groups.google.com/group/ansible-devel>`_
        Mailing list for development topics
-   `irc.freenode.net <http://irc.freenode.net>`_
-       #ansible IRC chat channel
+   :ref:`communication_irc`
+       How to join Ansible chat channels

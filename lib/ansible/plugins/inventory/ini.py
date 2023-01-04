@@ -8,23 +8,24 @@ DOCUMENTATION = '''
     version_added: "2.4"
     short_description: Uses an Ansible INI file as inventory source.
     description:
-        - INI file based inventory, sections are groups or group related with special `:modifiers`.
+        - INI file based inventory, sections are groups or group related with special C(:modifiers).
         - Entries in sections C([group_1]) are hosts, members of the group.
         - Hosts can have variables defined inline as key/value pairs separated by C(=).
         - The C(children) modifier indicates that the section contains groups.
         - The C(vars) modifier indicates that the section contains variables assigned to members of the group.
         - Anything found outside a section is considered an 'ungrouped' host.
-        - Values passed in the INI format using the ``key=value`` syntax are interpreted differently depending on where they are declared within your inventory.
+        - Values passed in the INI format using the C(key=value) syntax are interpreted differently depending on where they are declared within your inventory.
         - When declared inline with the host, INI values are processed by Python's ast.literal_eval function
-          (U(https://docs.python.org/2/library/ast.html#ast.literal_eval)) and interpreted as Python literal structures
-          (strings, numbers, tuples, lists, dicts, booleans, None). Host lines accept multiple C(key=value) parameters per line.
+          (U(https://docs.python.org/3/library/ast.html#ast.literal_eval)) and interpreted as Python literal structures
+         (strings, numbers, tuples, lists, dicts, booleans, None). If you want a number to be treated as a string, you must quote it.
+          Host lines accept multiple C(key=value) parameters per line.
           Therefore they need a way to indicate that a space is part of a value rather than a separator.
         - When declared in a C(:vars) section, INI values are interpreted as strings. For example C(var=FALSE) would create a string equal to C(FALSE).
           Unlike host lines, C(:vars) sections accept only a single entry per line, so everything after the C(=) must be the value for the entry.
         - Do not rely on types set during definition, always make sure you specify type with a filter when needed when consuming the variable.
         - See the Examples for proper quoting to prevent changes to variable type.
     notes:
-        - Whitelisted in configuration by default.
+        - Enabled in configuration by default.
         - Consider switching to YAML format for inventory sources to avoid confusion on the actual type of a variable.
           The YAML inventory plugin processes variable values consistently and correctly.
 '''

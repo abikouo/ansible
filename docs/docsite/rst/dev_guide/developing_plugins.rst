@@ -29,14 +29,17 @@ You should return errors encountered during plugin execution by raising ``Ansibl
 
 .. code-block:: python
 
-    from ansible.module_utils._text import to_native
+    from ansible.module_utils.common.text.converters import to_native
 
     try:
         cause_an_exception()
     except Exception as e:
         raise AnsibleError('Something happened, this was original exception: %s' % to_native(e))
 
+Since Ansible evaluates variables only when they are needed, filter and test plugins should propagate the exceptions ``jinja2.exceptions.UndefinedError`` and ``AnsibleUndefinedVariable`` to ensure undefined variables are only fatal when necessary.
+
 Check the different `AnsibleError objects <https://github.com/ansible/ansible/blob/devel/lib/ansible/errors/__init__.py>`_ and see which one applies best to your situation.
+Check the section on the specific plugin type you're developing for type-specific error handling details.
 
 String encoding
 ===============
@@ -45,7 +48,7 @@ You must convert any strings returned by your plugin into Python's unicode type.
 
 .. code-block:: python
 
-    from ansible.module_utils._text import to_text
+    from ansible.module_utils.common.text.converters import to_text
     result_string = to_text(result_string)
 
 Plugin configuration & documentation standards
@@ -64,13 +67,19 @@ To define configurable options for your plugin, describe them in the ``DOCUMENTA
         ini:
           - section: section_of_ansible.cfg_where_this_config_option_is_defined
             key: key_used_in_ansible.cfg
+        vars:
+          - name: name_of_ansible_var
+          - name: name_of_second_var
+            version_added: X.x
         required: True/False
         type: boolean/float/integer/list/none/path/pathlist/pathspec/string/tmppath
         version_added: X.x
 
-To access the configuration settings in your plugin, use ``self.get_option(<option_name>)``. For most plugin types, the controller pre-populates the settings. If you need to populate settings explicitly, use a ``self.set_options()`` call.
+To access the configuration settings in your plugin, use ``self.get_option(<option_name>)``. For the plugin types (such as 'become', 'cache', 'callback', 'cliconf', 'connection', 'httpapi', 'inventory', 'lookup', 'netconf', 'shell', and 'vars') that support embedded documentation, the controller pre-populates the settings. If you need to populate settings explicitly, use a ``self.set_options()`` call.
 
-Plugins that support embedded documentation (see :ref:`ansible-doc` for the list) should include well-formed doc strings. If you inherit from a plugin, you must document the options it takes, either via a documentation fragment or as a copy. See :ref:`module_documenting` for more information on correct documentation. Thorough documentation is a good idea even if you're developing a plugin for local use.
+Configuration sources follow the precedence rules for values in Ansible. When there are multiple values from the same category, the value defined last takes precedence. For example, in the above configuration block, if both ``name_of_ansible_var`` and ``name_of_second_var`` are defined, the value of the ``option_name`` option will be the value of ``name_of_second_var``. Refer to :ref:`general_precedence_rules` for further information.
+
+Plugins that support embedded documentation (see :ref:`ansible-doc` for the list) should include well-formed doc strings. If you inherit from a plugin, you must document the options it takes, either through a documentation fragment or as a copy. See :ref:`module_documenting` for more information on correct documentation. Thorough documentation is a good idea even if you're developing a plugin for local use.
 
 Developing particular plugin types
 ==================================
@@ -151,7 +160,7 @@ Cache plugins
 
 Cache plugins store gathered facts and data retrieved by inventory plugins.
 
-Import cache plugins using the cache_loader so you can use ``self.set_options()`` and ``self.get_option(<option_name>)``. If you import a cache plugin directly in the code base, you can only access options via ``ansible.constants``, and you break the cache plugin's ability to be used by an inventory plugin.
+Import cache plugins using the cache_loader so you can use ``self.set_options()`` and ``self.get_option(<option_name>)``. If you import a cache plugin directly in the code base, you can only access options by the ``ansible.constants``, and you break the cache plugin's ability to be used by an inventory plugin.
 
 .. code-block:: python
 
@@ -216,7 +225,7 @@ but with an extra option so you can see how configuration works in Ansible versi
 
     # not only visible to ansible-doc, it also 'declares' the options the plugin requires and how to configure them.
     DOCUMENTATION = '''
-    callback: timer
+    name: timer
     callback_type: aggregate
     requirements:
         - enable in configuration
@@ -278,7 +287,7 @@ Note that the ``CALLBACK_VERSION`` and ``CALLBACK_NAME`` definitions are require
 
 For example callback plugins, see the source code for the `callback plugins included with Ansible Core <https://github.com/ansible/ansible/tree/devel/lib/ansible/plugins/callback>`_
 
-New in ansible-core 2.11, callback plugins are notified (via ``v2_playbook_on_task_start``) of :ref:`meta<meta_module>` tasks. By default, only explicit ``meta`` tasks that users list in their plays are sent to callbacks.
+New in ansible-core 2.11, callback plugins are notified (by the ``v2_playbook_on_task_start``) of :ref:`meta<meta_module>` tasks. By default, only explicit ``meta`` tasks that users list in their plays are sent to callbacks.
 
 There are also some tasks which are generated internally and implicitly at various points in execution. Callback plugins can opt-in to receiving these implicit tasks as well, by setting ``self.wants_implicit_tasks = True``. Any ``Task`` object received by a callback hook will have an ``.implicit`` attribute, which can be consulted to determine whether the ``Task`` originated from within Ansible, or explicitly by the user.
 
@@ -306,6 +315,17 @@ Filter plugins manipulate data. They are a feature of Jinja2 and are also availa
 
 Filter plugins do not use the standard configuration and documentation system described above.
 
+Since Ansible evaluates variables only when they are needed, filter plugins should propagate the exceptions ``jinja2.exceptions.UndefinedError`` and ``AnsibleUndefinedVariable`` to ensure undefined variables are only fatal when necessary.
+
+.. code-block:: python
+
+   try:
+       cause_an_exception(with_undefined_variable)
+   except jinja2.exceptions.UndefinedError as e:
+       raise AnsibleUndefinedVariable("Something happened, this was the original exception: %s" % to_native(e))
+   except Exception as e:
+       raise AnsibleFilterError("Something happened, this was the original exception: %s" % to_native(e))
+
 For example filter plugins, see the source code for the `filter plugins included with Ansible Core <https://github.com/ansible/ansible/tree/devel/lib/ansible/plugins/filter>`_.
 
 .. _developing_inventory_plugins:
@@ -322,9 +342,9 @@ You can see the details for inventory plugins in the :ref:`developing_inventory`
 Lookup plugins
 --------------
 
-Lookup plugins pull in data from external data stores. Lookup plugins can be used within playbooks both for looping --- playbook language constructs like ``with_fileglob`` and ``with_items`` are implemented via lookup plugins --- and to return values into a variable or parameter.
+Lookup plugins pull in data from external data stores. Lookup plugins can be used within playbooks both for looping --- playbook language constructs like ``with_fileglob`` and ``with_items`` are implemented through lookup plugins --- and to return values into a variable or parameter.
 
-Lookup plugins are very flexible, allowing you to retrieve and return any type of data. When writing lookup plugins, always return data of a consistent type that can be easily consumed in a playbook. Avoid parameters that change the returned data type. If there is a need to return a single value sometimes and a complex dictionary other times, write two different lookup plugins.
+Lookup plugins are expected to return lists, even if just a single element.
 
 Ansible includes many :ref:`filters <playbooks_filters>` which can be used to manipulate the data returned by a lookup plugin. Sometimes it makes sense to do the filtering inside the lookup plugin, other times it is better to return results that can be filtered in the playbook. Keep in mind how the data will be referenced when determining the appropriate level of filtering to be done inside the lookup plugin.
 
@@ -337,8 +357,8 @@ Here's a simple lookup plugin implementation --- this lookup returns the content
     __metaclass__ = type
 
     DOCUMENTATION = """
-      lookup: file
-      author: Daniel Hokka Zakrisson <daniel@hozac.com>
+      name: file
+      author: Daniel Hokka Zakrisson (@dhozac) <daniel@hozac.com>
       version_added: "0.9"  # for collections, use the collection version, not the Ansible version
       short_description: read file contents
       description:
@@ -347,9 +367,17 @@ Here's a simple lookup plugin implementation --- this lookup returns the content
         _terms:
           description: path(s) of files to read
           required: True
+        option1:
+          description:
+                - Sample option that could modify plugin behaviour.
+                - This one can be set directly ``option1='x'`` or in ansible.cfg, but can also use vars or environment.
+          type: string
+          ini:
+            - section: file_lookup
+              key: option1
       notes:
         - if read in variable context, the file can be interpreted as YAML if the content is valid to the parser.
-        - this lookup does not understand globing --- use the fileglob lookup instead.
+        - this lookup does not understand globbing --- use the fileglob lookup instead.
     """
     from ansible.errors import AnsibleError, AnsibleParserError
     from ansible.plugins.lookup import LookupBase
@@ -361,6 +389,9 @@ Here's a simple lookup plugin implementation --- this lookup returns the content
 
         def run(self, terms, variables=None, **kwargs):
 
+          # First of all populate options,
+          # this will already take into account env vars and ini config
+          self.set_options(var_options=variables, direct=kwargs)
 
           # lookups in general are expected to both take a list as input and output a list
           # this is done so they work with the looping construct 'with_'.
@@ -387,6 +418,10 @@ Here's a simple lookup plugin implementation --- this lookup returns the content
               except AnsibleParserError:
                   raise AnsibleError("could not locate file in lookup: %s" % term)
 
+              # consume an option: if this did something useful, you can retrieve the option value here
+              if self.get_option('option1') == 'do something':
+                pass
+
           return ret
 
 
@@ -398,7 +433,7 @@ The following is an example of how this lookup is called:
   - hosts: all
     vars:
        contents: "{{ lookup('namespace.collection_name.file', '/etc/foo.txt') }}"
-
+       contents_with_option: "{{ lookup('namespace.collection_name.file', '/etc/foo.txt', option1='donothing') }}"
     tasks:
 
        - debug:
@@ -418,6 +453,17 @@ Test plugins verify data. They are a feature of Jinja2 and are also available in
 
 Test plugins do not use the standard configuration and documentation system described above.
 
+Since Ansible evaluates variables only when they are needed, test plugins should propagate the exceptions ``jinja2.exceptions.UndefinedError`` and ``AnsibleUndefinedVariable`` to ensure undefined variables are only fatal when necessary.
+
+.. code-block:: python
+
+   try:
+       cause_an_exception(with_undefined_variable)
+   except jinja2.exceptions.UndefinedError as e:
+       raise AnsibleUndefinedVariable("Something happened, this was the original exception: %s" % to_native(e))
+   except Exception as e:
+       raise AnsibleFilterError("Something happened, this was the original exception: %s" % to_native(e))
+
 For example test plugins, see the source code for the `test plugins included with Ansible Core <https://github.com/ansible/ansible/tree/devel/lib/ansible/plugins/test>`_.
 
 .. _developing_vars_plugins:
@@ -427,7 +473,7 @@ Vars plugins
 
 Vars plugins inject additional variable data into Ansible runs that did not come from an inventory source, playbook, or command line. Playbook constructs like 'host_vars' and 'group_vars' work using vars plugins.
 
-Vars plugins were partially implemented in Ansible 2.0 and rewritten to be fully implemented starting with Ansible 2.4. Vars plugins are unsupported by collections.
+Vars plugins were partially implemented in Ansible 2.0 and rewritten to be fully implemented starting with Ansible 2.4. Vars plugins are supported by collections starting with Ansible 2.10.
 
 Older plugins used a ``run`` method as their main body/work:
 
@@ -455,7 +501,9 @@ This ``get_vars`` method just needs to return a dictionary structure with the va
 
 Since Ansible version 2.4, vars plugins only execute as needed when preparing to execute a task. This avoids the costly 'always execute' behavior that occurred during inventory construction in older versions of Ansible. Since Ansible version 2.10, vars plugin execution can be toggled by the user to run when preparing to execute a task or after importing an inventory source.
 
-You can create vars plugins that are not enabled by default using the class variable ``REQUIRES_ENABLED``. If your vars plugin resides in a collection, it cannot be enabled by default. You must use ``REQUIRES_ENABLED`` in all collections-based vars plugins. To require users to enable your plugin, set the class variable ``REQUIRES_ENABLED``:
+The user must explicitly enable vars plugins that reside in a collection. See :ref:`enable_vars` for details.
+
+Legacy vars plugins are always loaded and run by default. You can prevent them from automatically running by setting ``REQUIRES_ENABLED`` to True.
 
 .. code-block:: python
 
@@ -467,7 +515,7 @@ Include the ``vars_plugin_staging`` documentation fragment to allow users to det
 .. code-block:: python
 
     DOCUMENTATION = '''
-        vars: custom_hostvars
+        name: custom_hostvars
         version_added: "2.10"  # for collections, use the collection version, not the Ansible version
         short_description: Load custom host vars
         description: Load custom host vars
@@ -497,5 +545,5 @@ For example vars plugins, see the source code for the `vars plugins included wit
        Learn about how to write Ansible modules
    `Mailing List <https://groups.google.com/group/ansible-devel>`_
        The development mailing list
-   `irc.freenode.net <http://irc.freenode.net>`_
-       #ansible IRC chat channel
+   :ref:`communication_irc`
+       How to join Ansible chat channels

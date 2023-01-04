@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>
@@ -35,6 +34,7 @@ options:
   dest:
     description:
       - Remote absolute path where the archive should be unpacked.
+      - The given path must exist. Base directory is not created by this module.
     type: path
     required: true
   copy:
@@ -47,8 +47,15 @@ options:
   creates:
     description:
       - If the specified absolute path (file or directory) already exists, this step will B(not) be run.
+      - The specified absolute path (file or directory) must be below the base path given with C(dest:).
     type: path
     version_added: "1.6"
+  io_buffer_size:
+    description:
+      - Size of the volatile memory buffer that is used for extracting files from the archive in bytes.
+    type: int
+    default: 65536
+    version_added: "2.12"
   list_files:
     description:
       - If set to True, return the list of files that are contained in the tarball.
@@ -65,8 +72,8 @@ options:
     version_added: "2.1"
   include:
     description:
-      - List of directory and file entries that you would like to extract from the archive. Only
-        files listed here will be extracted.
+      - List of directory and file entries that you would like to extract from the archive. If C(include)
+        is not empty, only files listed here will be extracted.
       - Mutually exclusive with C(exclude).
     type: list
     default: []
@@ -85,11 +92,11 @@ options:
       - Command-line options with multiple elements must use multiple lines in the array, one for each element.
     type: list
     elements: str
-    default: ""
+    default: []
     version_added: "2.1"
   remote_src:
     description:
-      - Set to C(yes) to indicate the archived file is already on the remote system and not local to the Ansible controller.
+      - Set to C(true) to indicate the archived file is already on the remote system and not local to the Ansible controller.
       - This option is mutually exclusive with C(copy).
     type: bool
     default: no
@@ -97,14 +104,36 @@ options:
   validate_certs:
     description:
       - This only applies if using a https URL as the source of the file.
-      - This should only set to C(no) used on personally controlled sites using self-signed certificate.
-      - Prior to 2.2 the code worked as if this was set to C(yes).
+      - This should only set to C(false) used on personally controlled sites using self-signed certificate.
+      - Prior to 2.2 the code worked as if this was set to C(true).
     type: bool
     default: yes
     version_added: "2.2"
 extends_documentation_fragment:
+- action_common_attributes
+- action_common_attributes.flow
+- action_common_attributes.files
 - decrypt
 - files
+attributes:
+    action:
+      support: full
+    async:
+      support: none
+    bypass_host_loop:
+      support: none
+    check_mode:
+      support: partial
+      details: Not supported for gzipped tar files.
+    diff_mode:
+      support: partial
+      details: Uses gtar's C(--diff) arg to calculate if changed or not. If this C(arg) is not supported, it will always unpack the archive.
+    platform:
+      platforms: posix
+    safe_file_operations:
+      support: none
+    vault:
+      support: full
 todo:
     - Re-implement tar support using native tarfile module.
     - Re-implement zip support using native zipfile module.
@@ -113,13 +142,10 @@ notes:
     - Requires C(zstd) command on target host to expand I(.tar.zst) files.
     - Can handle I(.zip) files using C(unzip) as well as I(.tar), I(.tar.gz), I(.tar.bz2), I(.tar.xz), and I(.tar.zst) files using C(gtar).
     - Does not handle I(.gz) files, I(.bz2) files, I(.xz), or I(.zst) files that do not contain a I(.tar) archive.
-    - Uses gtar's C(--diff) arg to calculate if changed or not. If this C(arg) is not
-      supported, it will always unpack the archive.
     - Existing files/directories in the destination which are not in the archive
       are not touched. This is the same behavior as a normal archive extraction.
     - Existing files/directories in the destination which are not in the archive
       are ignored for purposes of deciding if the archive should be unpacked or not.
-    - Supports C(check_mode).
 seealso:
 - module: community.general.archive
 - module: community.general.iso_extract
@@ -226,14 +252,17 @@ import re
 import stat
 import time
 import traceback
+from functools import partial
 from zipfile import ZipFile, BadZipfile
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.urls import fetch_file
 from ansible.module_utils._text import to_bytes, to_native, to_text
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.common.process import get_bin_path
+from ansible.module_utils.common.locale import get_best_parsable_locale
+from ansible.module_utils.urls import fetch_file
 
 try:  # python 3.3+
-    from shlex import quote
+    from shlex import quote  # type: ignore[attr-defined]
 except ImportError:  # older python
     from pipes import quote
 
@@ -251,11 +280,14 @@ INVALID_OWNER_RE = re.compile(r': Invalid owner')
 INVALID_GROUP_RE = re.compile(r': Invalid group')
 
 
-def crc32(path):
+def crc32(path, buffer_size):
     ''' Return a CRC32 checksum of a file '''
+
+    crc = binascii.crc32(b'')
     with open(path, 'rb') as f:
-        file_content = f.read()
-    return binascii.crc32(file_content) & 0xffffffff
+        for b_block in iter(partial(f.read, buffer_size), b''):
+            crc = binascii.crc32(b_block, crc)
+    return crc & 0xffffffff
 
 
 def shell_escape(string):
@@ -275,13 +307,19 @@ class ZipArchive(object):
         self.file_args = file_args
         self.opts = module.params['extra_opts']
         self.module = module
+        self.io_buffer_size = module.params["io_buffer_size"]
         self.excludes = module.params['exclude']
         self.includes = []
         self.include_files = self.module.params['include']
-        self.cmd_path = self.module.get_bin_path('unzip')
-        self.zipinfocmd_path = self.module.get_bin_path('zipinfo')
+        self.cmd_path = None
+        self.zipinfo_cmd_path = None
         self._files_in_archive = []
         self._infodict = dict()
+        self.zipinfoflag = ''
+        self.binaries = (
+            ('unzip', 'cmd_path'),
+            ('zipinfo', 'zipinfo_cmd_path'),
+        )
 
     def _permstr_to_octal(self, modestr, umask):
         ''' Convert a Unix permission string (rw-r--r--) into a mode (0644) '''
@@ -297,11 +335,7 @@ class ZipArchive(object):
         return (mode & ~umask)
 
     def _legacy_file_list(self):
-        unzip_bin = self.module.get_bin_path('unzip')
-        if not unzip_bin:
-            raise UnarchiveError('Python Zipfile cannot read %s and unzip not found' % self.src)
-
-        rc, out, err = self.module.run_command([unzip_bin, '-v', self.src])
+        rc, out, err = self.module.run_command([self.cmd_path, '-v', self.src])
         if rc:
             raise UnarchiveError('Neither python zipfile nor unzip can read %s' % self.src)
 
@@ -359,21 +393,25 @@ class ZipArchive(object):
                         exclude_flag = False
                         if self.excludes:
                             for exclude in self.excludes:
-                                if not fnmatch.fnmatch(member, exclude):
+                                if fnmatch.fnmatch(member, exclude):
                                     exclude_flag = True
                                     break
                         if not exclude_flag:
                             self._files_in_archive.append(to_native(member))
-            except Exception:
+            except Exception as e:
                 archive.close()
-                raise UnarchiveError('Unable to list files in the archive')
+                raise UnarchiveError('Unable to list files in the archive: %s' % to_native(e))
 
             archive.close()
         return self._files_in_archive
 
     def is_unarchived(self):
         # BSD unzip doesn't support zipinfo listings with timestamp.
-        cmd = [self.zipinfocmd_path, '-T', '-s', self.src]
+        if self.zipinfoflag:
+            cmd = [self.zipinfo_cmd_path, self.zipinfoflag, '-T', '-s', self.src]
+        else:
+            cmd = [self.zipinfo_cmd_path, '-T', '-s', self.src]
+
         if self.excludes:
             cmd.extend(['-x', ] + self.excludes)
         if self.include_files:
@@ -588,7 +626,7 @@ class ZipArchive(object):
 
             # Compare file checksums
             if stat.S_ISREG(st.st_mode):
-                crc = crc32(b_dest)
+                crc = crc32(b_dest, self.io_buffer_size)
                 if crc != self._crc32(path):
                     change = True
                     err += 'File %s differs in CRC32 checksum (0x%08x vs 0x%08x)\n' % (path, self._crc32(path), crc)
@@ -693,13 +731,21 @@ class ZipArchive(object):
         return dict(cmd=cmd, rc=rc, out=out, err=err)
 
     def can_handle_archive(self):
-        if not self.cmd_path:
-            return False, 'Command "unzip" not found.'
+        missing = []
+        for b in self.binaries:
+            try:
+                setattr(self, b[1], get_bin_path(b[0]))
+            except ValueError:
+                missing.append(b[0])
+
+        if missing:
+            return False, "Unable to find required '{missing}' binary in the path.".format(missing="' or '".join(missing))
+
         cmd = [self.cmd_path, '-l', self.src]
         rc, out, err = self.module.run_command(cmd)
         if rc == 0:
             return True, None
-        return False, 'Command "%s" could not handle archive.' % self.cmd_path
+        return False, 'Command "%s" could not handle archive: %s' % (self.cmd_path, err)
 
 
 class TgzArchive(object):
@@ -714,18 +760,10 @@ class TgzArchive(object):
             self.module.exit_json(skipped=True, msg="remote module (%s) does not support check mode when using gtar" % self.module._name)
         self.excludes = [path.rstrip('/') for path in self.module.params['exclude']]
         self.include_files = self.module.params['include']
-        # Prefer gtar (GNU tar) as it supports the compression options -z, -j and -J
-        self.cmd_path = self.module.get_bin_path('gtar', None)
-        if not self.cmd_path:
-            # Fallback to tar
-            self.cmd_path = self.module.get_bin_path('tar')
+        self.cmd_path = None
+        self.tar_type = None
         self.zipflag = '-z'
         self._files_in_archive = []
-
-        if self.cmd_path:
-            self.tar_type = self._get_tar_type()
-        else:
-            self.tar_type = None
 
     def _get_tar_type(self):
         cmd = [self.cmd_path, '--version']
@@ -753,9 +791,10 @@ class TgzArchive(object):
         if self.include_files:
             cmd.extend(self.include_files)
 
-        rc, out, err = self.module.run_command(cmd, cwd=self.b_dest, environ_update=dict(LANG='C', LC_ALL='C', LC_MESSAGES='C'))
+        locale = get_best_parsable_locale(self.module)
+        rc, out, err = self.module.run_command(cmd, cwd=self.b_dest, environ_update=dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale, LANGUAGE=locale))
         if rc != 0:
-            raise UnarchiveError('Unable to list files in the archive')
+            raise UnarchiveError('Unable to list files in the archive: %s' % err)
 
         for filename in out.splitlines():
             # Compensate for locale-related problems in gtar output (octal unicode representation) #11348
@@ -797,7 +836,8 @@ class TgzArchive(object):
         cmd.extend(['-f', self.src])
         if self.include_files:
             cmd.extend(self.include_files)
-        rc, out, err = self.module.run_command(cmd, cwd=self.b_dest, environ_update=dict(LANG='C', LC_ALL='C', LC_MESSAGES='C'))
+        locale = get_best_parsable_locale(self.module)
+        rc, out, err = self.module.run_command(cmd, cwd=self.b_dest, environ_update=dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale, LANGUAGE=locale))
 
         # Check whether the differences are in something that we're
         # setting anyway
@@ -850,12 +890,22 @@ class TgzArchive(object):
         cmd.extend(['-f', self.src])
         if self.include_files:
             cmd.extend(self.include_files)
-        rc, out, err = self.module.run_command(cmd, cwd=self.b_dest, environ_update=dict(LANG='C', LC_ALL='C', LC_MESSAGES='C'))
+        locale = get_best_parsable_locale(self.module)
+        rc, out, err = self.module.run_command(cmd, cwd=self.b_dest, environ_update=dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale, LANGUAGE=locale))
         return dict(cmd=cmd, rc=rc, out=out, err=err)
 
     def can_handle_archive(self):
-        if not self.cmd_path:
-            return False, 'Commands "gtar" and "tar" not found.'
+        # Prefer gtar (GNU tar) as it supports the compression options -z, -j and -J
+        try:
+            self.cmd_path = get_bin_path('gtar')
+        except ValueError:
+            # Fallback to tar
+            try:
+                self.cmd_path = get_bin_path('tar')
+            except ValueError:
+                return False, "Unable to find required 'gtar' or 'tar' binary in the path"
+
+        self.tar_type = self._get_tar_type()
 
         if self.tar_type != 'gnu':
             return False, 'Command "%s" detected as tar type %s. GNU tar required.' % (self.cmd_path, self.tar_type)
@@ -863,8 +913,8 @@ class TgzArchive(object):
         try:
             if self.files_in_archive:
                 return True, None
-        except UnarchiveError:
-            return False, 'Command "%s" could not handle archive.' % self.cmd_path
+        except UnarchiveError as e:
+            return False, 'Command "%s" could not handle archive: %s' % (self.cmd_path, to_native(e))
         # Errors and no files in archive assume that we weren't able to
         # properly unarchive it
         return False, 'Command "%s" found no files in archive. Empty archive files are not supported.' % self.cmd_path
@@ -905,9 +955,32 @@ class TarZstdArchive(TgzArchive):
         self.zipflag = '--use-compress-program=zstd'
 
 
+class ZipZArchive(ZipArchive):
+    def __init__(self, src, b_dest, file_args, module):
+        super(ZipZArchive, self).__init__(src, b_dest, file_args, module)
+        self.zipinfoflag = '-Z'
+        self.binaries = (
+            ('unzip', 'cmd_path'),
+            ('unzip', 'zipinfo_cmd_path'),
+        )
+
+    def can_handle_archive(self):
+        unzip_available, error_msg = super(ZipZArchive, self).can_handle_archive()
+
+        if not unzip_available:
+            return unzip_available, error_msg
+
+        # Ensure unzip -Z is available before we use it in is_unarchive
+        cmd = [self.zipinfo_cmd_path, self.zipinfoflag]
+        rc, out, err = self.module.run_command(cmd)
+        if 'zipinfo' in out.lower():
+            return True, None
+        return False, 'Command "unzip -Z" could not handle archive: %s' % err
+
+
 # try handlers in order and return the one that works or bail if none work
 def pick_handler(src, dest, file_args, module):
-    handlers = [ZipArchive, TgzArchive, TarArchive, TarBzipArchive, TarXzArchive, TarZstdArchive]
+    handlers = [ZipArchive, ZipZArchive, TgzArchive, TarArchive, TarBzipArchive, TarXzArchive, TarZstdArchive]
     reasons = set()
     for handler in handlers:
         obj = handler(src, dest, file_args, module)
@@ -915,8 +988,8 @@ def pick_handler(src, dest, file_args, module):
         if can_handle:
             return obj
         reasons.add(reason)
-    reason_msg = ' '.join(reasons)
-    module.fail_json(msg='Failed to find handler for "%s". Make sure the required command to extract the file is installed. %s' % (src, reason_msg))
+    reason_msg = '\n'.join(reasons)
+    module.fail_json(msg='Failed to find handler for "%s". Make sure the required command to extract the file is installed.\n%s' % (src, reason_msg))
 
 
 def main():
@@ -933,6 +1006,13 @@ def main():
             include=dict(type='list', elements='str', default=[]),
             extra_opts=dict(type='list', elements='str', default=[]),
             validate_certs=dict(type='bool', default=True),
+            io_buffer_size=dict(type='int', default=64 * 1024),
+
+            # Options that are for the action plugin, but ignored by the module itself.
+            # We have them here so that the sanity tests pass without ignores, which
+            # reduces the likelihood of further bugs added.
+            copy=dict(type='bool', default=True),
+            decrypt=dict(type='bool', default=True),
         ),
         add_file_common_args=True,
         # check-mode only works for zip files, we cover that later
@@ -1001,6 +1081,7 @@ def main():
     # Run only if we found differences (idempotence) or diff was missing
     if res_args.get('diff', True) and not module.check_mode:
         # do we need to change perms?
+        top_folders = []
         for filename in handler.files_in_archive:
             file_args['path'] = os.path.join(b_dest, to_bytes(filename, errors='surrogate_or_strict'))
 
@@ -1008,6 +1089,21 @@ def main():
                 res_args['changed'] = module.set_fs_attributes_if_different(file_args, res_args['changed'], expand=False)
             except (IOError, OSError) as e:
                 module.fail_json(msg="Unexpected error when accessing exploded file: %s" % to_native(e), **res_args)
+
+            if '/' in filename:
+                top_folder_path = filename.split('/')[0]
+                if top_folder_path not in top_folders:
+                    top_folders.append(top_folder_path)
+
+        # make sure top folders have the right permissions
+        # https://github.com/ansible/ansible/issues/35426
+        if top_folders:
+            for f in top_folders:
+                file_args['path'] = "%s/%s" % (dest, f)
+                try:
+                    res_args['changed'] = module.set_fs_attributes_if_different(file_args, res_args['changed'], expand=False)
+                except (IOError, OSError) as e:
+                    module.fail_json(msg="Unexpected error when accessing exploded file: %s" % to_native(e), **res_args)
 
     if module.params['list_files']:
         res_args['files'] = handler.files_in_archive

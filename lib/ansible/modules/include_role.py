@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: Ansible Project
@@ -54,7 +53,7 @@ options:
     default: yes
   public:
     description:
-      - This option dictates whether the role's C(vars) and C(defaults) are exposed to the play. If set to C(yes)
+      - This option dictates whether the role's C(vars) and C(defaults) are exposed to the play. If set to C(true)
         the variables will be available to tasks following the C(include_role) task. This functionality differs from
         standard variable exposure for roles listed under the C(roles) header or C(import_role) as they are exposed
         to the play at playbook parsing time, and available to earlier roles and tasks as well.
@@ -73,11 +72,19 @@ options:
     type: bool
     default: yes
     version_added: '2.11'
+extends_documentation_fragment:
+    - action_common_attributes
+    - action_common_attributes.conn
+    - action_common_attributes.flow
+    - action_core
+    - action_core.include
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: none
 notes:
-  - Handlers are made available to the whole play.
-  - Before Ansible 2.4, as with C(include), this task could be static or dynamic, If static, it implied that it won't
-    need templating, loops or conditionals and will show included tasks in the C(--list) options. Ansible would try to
-    autodetect what is needed, but you can set C(static) to C(yes) or C(no) at task level to control this.
+  - Handlers and are made available to the whole play.
   - After Ansible 2.4, you can use M(ansible.builtin.import_role) for C(static) behaviour and this action for C(dynamic) one.
 seealso:
 - module: ansible.builtin.import_playbook
@@ -89,22 +96,22 @@ seealso:
 '''
 
 EXAMPLES = r'''
-- include_role:
+- ansible.builtin.include_role:
     name: myrole
 
 - name: Run tasks/other.yaml instead of 'main'
-  include_role:
+  ansible.builtin.include_role:
     name: myrole
     tasks_from: other
 
 - name: Pass variables to role
-  include_role:
+  ansible.builtin.include_role:
     name: myrole
   vars:
     rolevar1: value from task
 
 - name: Use role in loop
-  include_role:
+  ansible.builtin.include_role:
     name: '{{ roleinputvar }}'
   loop:
     - '{{ roleinput1 }}'
@@ -113,12 +120,12 @@ EXAMPLES = r'''
     loop_var: roleinputvar
 
 - name: Conditional role
-  include_role:
+  ansible.builtin.include_role:
     name: myrole
   when: not idontwanttorun
 
 - name: Apply tags to tasks within included file
-  include_role:
+  ansible.builtin.include_role:
     name: install
     apply:
       tags:

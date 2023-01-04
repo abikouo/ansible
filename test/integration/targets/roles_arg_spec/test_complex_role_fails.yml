@@ -3,13 +3,23 @@
   hosts: localhost
   gather_facts: false
   vars:
+      ansible_unicode_type_match: "<type 'ansible.parsing.yaml.objects.AnsibleUnicode'>"
       unicode_type_match: "<type 'unicode'>"
       string_type_match: "<type 'str'>"
       float_type_match: "<type 'float'>"
+      list_type_match: "<type 'list'>"
+      ansible_list_type_match: "<type 'ansible.parsing.yaml.objects.AnsibleSequence'>"
+      dict_type_match: "<type 'dict'>"
+      ansible_dict_type_match: "<type 'ansible.parsing.yaml.objects.AnsibleMapping'>"
+      ansible_unicode_class_match: "<class 'ansible.parsing.yaml.objects.AnsibleUnicode'>"
       unicode_class_match: "<class 'unicode'>"
       string_class_match: "<class 'str'>"
       bytes_class_match: "<class 'bytes'>"
       float_class_match: "<class 'float'>"
+      list_class_match: "<class 'list'>"
+      ansible_list_class_match: "<class 'ansible.parsing.yaml.objects.AnsibleSequence'>"
+      dict_class_match: "<class 'dict'>"
+      ansible_dict_class_match: "<class 'ansible.parsing.yaml.objects.AnsibleMapping'>"
       expected:
           test1_1:
               argument_errors: [
@@ -24,20 +34,13 @@
                   "value of test1_choices must be one of: this paddle game, the astray, this remote control, the chair, got: My dog",
                   "value of some_choices must be one of: choice1, choice2, got: choice4",
                   "argument 'some_second_level' is of type <class 'ansible.parsing.yaml.objects.AnsibleUnicode'> found in 'some_dict_options'. and we were unable to convert to bool: The value 'not-a-bool' is not a valid boolean.  ",
-                  "argument 'third_level' is of type <class 'ansible.parsing.yaml.objects.AnsibleUnicode'> found in 'multi_level_option -> second_level'. and we were unable to convert to int: <class 'ansible.parsing.yaml.objects.AnsibleUnicode'> cannot be converted to an int"
+                  "argument 'third_level' is of type <class 'ansible.parsing.yaml.objects.AnsibleUnicode'> found in 'multi_level_option -> second_level'. and we were unable to convert to int: <class 'ansible.parsing.yaml.objects.AnsibleUnicode'> cannot be converted to an int",
+                  "argument 'some_more_dict_options' is of type <class 'ansible.parsing.yaml.objects.AnsibleUnicode'> and we were unable to convert to dict: dictionary requested, could not parse JSON or key=value",
+                  "value of 'some_more_dict_options' must be of type dict or list of dicts",
+                  "dictionary requested, could not parse JSON or key=value",
                   ]
 
   tasks:
-      # This test play requires jinja >= 2.7
-      - name: get the jinja2 version
-        shell: python -c 'import jinja2; print(jinja2.__version__)'
-        register: jinja2_version
-        delegate_to: localhost
-        changed_when: false
-
-      - debug:
-          msg: "Jinja version: {{ jinja2_version.stdout }}"
-
       - name: include_role test1 since it has a arg_spec.yml
         block:
             - include_role:
@@ -76,6 +79,7 @@
                 some_str_removed_in: "foo"
                 some_dict_options:
                   some_second_level: "not-a-bool"
+                some_more_dict_options: "not-a-dict"
                 multi_level_option:
                   second_level:
                     third_level: "should_be_int"
@@ -98,24 +102,44 @@
                   # because py3 quotes the value in the error while py2 does not, so we just ignore
                   # the rest of the line.
                   actual_generic: "{{ ansible_failed_result.argument_errors|
+                                      map('replace', ansible_unicode_type_match, 'STR')|
                                       map('replace', unicode_type_match, 'STR')|
                                       map('replace', string_type_match, 'STR')|
                                       map('replace', float_type_match, 'FLOAT')|
+                                      map('replace', list_type_match, 'LIST')|
+                                      map('replace', ansible_list_type_match, 'LIST')|
+                                      map('replace', dict_type_match, 'DICT')|
+                                      map('replace', ansible_dict_type_match, 'DICT')|
+                                      map('replace', ansible_unicode_class_match, 'STR')|
                                       map('replace', unicode_class_match, 'STR')|
                                       map('replace', string_class_match, 'STR')|
                                       map('replace', bytes_class_match, 'STR')|
                                       map('replace', float_class_match, 'FLOAT')|
+                                      map('replace', list_class_match, 'LIST')|
+                                      map('replace', ansible_list_class_match, 'LIST')|
+                                      map('replace', dict_class_match, 'DICT')|
+                                      map('replace', ansible_dict_class_match, 'DICT')|
                                       map('regex_replace', '''float:.*$''', 'THE_FLOAT_REPR')|
                                       map('regex_replace', 'Valid booleans include.*$', '')|
                                       list }}"
                   expected_generic: "{{ expected.test1_1.argument_errors|
+                                        map('replace', ansible_unicode_type_match, 'STR')|
                                         map('replace', unicode_type_match, 'STR')|
                                         map('replace', string_type_match, 'STR')|
                                         map('replace', float_type_match, 'FLOAT')|
+                                        map('replace', list_type_match, 'LIST')|
+                                        map('replace', ansible_list_type_match, 'LIST')|
+                                        map('replace', dict_type_match, 'DICT')|
+                                        map('replace', ansible_dict_type_match, 'DICT')|
+                                        map('replace', ansible_unicode_class_match, 'STR')|
                                         map('replace', unicode_class_match, 'STR')|
                                         map('replace', string_class_match, 'STR')|
                                         map('replace', bytes_class_match, 'STR')|
                                         map('replace', float_class_match, 'FLOAT')|
+                                        map('replace', list_class_match, 'LIST')|
+                                        map('replace', ansible_list_class_match, 'LIST')|
+                                        map('replace', dict_class_match, 'DICT')|
+                                        map('replace', ansible_dict_class_match, 'DICT')|
                                         map('regex_replace', '''float:.*$''', 'THE_FLOAT_REPR')|
                                         map('regex_replace', 'Valid booleans include.*$', '')|
                                         list }}"
@@ -144,7 +168,3 @@
                   - ansible_failed_result.validate_args_context.name == "test1"
                   - ansible_failed_result.validate_args_context.type == "role"
                   - "ansible_failed_result.validate_args_context.path is search('roles_arg_spec/roles/test1')"
-
-        # skip this task if jinja isnt >= 2.7, aka centos6
-        when:
-            - jinja2_version.stdout is version('2.7', '>=')

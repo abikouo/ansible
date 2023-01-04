@@ -18,7 +18,7 @@ The document doesn't apply to other parts of Ansible for which the recommendatio
 normally closer to the Python standard. There is basic documentation for Ansible unit
 tests in the developer guide :ref:`testing_units`. This document should
 be readable for a new Ansible module author. If you find it incomplete or confusing,
-please open a bug or ask for help on Ansible IRC.
+please open a bug or ask for help on the #ansible-devel chat channel (using Matrix at ansible.im or using IRC at `irc.libera.chat <https://libera.chat/>`_).
 
 What Are Unit Tests?
 ====================
@@ -76,7 +76,7 @@ with integration tests, such as:
   failures and exceptions
 * Extensive testing of slow configuration APIs
 * Situations where the integration tests cannot be run as part of the main Ansible
-  continuous integration running in Shippable.
+  continuous integration running in Azure Pipelines.
 
 
 
@@ -168,7 +168,9 @@ Ensuring failure cases are visible with mock objects
 Functions like :meth:`module.fail_json` are normally expected to terminate execution. When you
 run with a mock module object this doesn't happen since the mock always returns another mock
 from a function call. You can set up the mock to raise an exception as shown above, or you can
-assert that these functions have not been called in each test. For example::
+assert that these functions have not been called in each test. For example:
+
+.. code-block:: python
 
   module = MagicMock()
   function_to_test(module, argument)
@@ -185,7 +187,9 @@ The setup of an actual module is quite complex (see `Passing Arguments`_ below) 
 isn't needed for most functions which use a module. Instead you can use a mock object as
 the module and create any module attributes needed by the function you are testing. If
 you do this, beware that the module exit functions need special handling as mentioned
-above, either by throwing an exception or ensuring that they haven't been called. For example::
+above, either by throwing an exception or ensuring that they haven't been called. For example:
+
+.. code-block:: python
 
     class AnsibleExitJson(Exception):
         """Exception class to be raised by module.exit_json and caught by the test case"""
@@ -195,9 +199,9 @@ above, either by throwing an exception or ensuring that they haven't been called
     module = MagicMock()
     module.exit_json.side_effect = AnsibleExitJson(Exception)
     with self.assertRaises(AnsibleExitJson) as result:
-        return = my_module.test_this_function(module, argument)
+        results = my_module.test_this_function(module, argument)
     module.fail_json.assert_not_called()
-    assert return["changed"] == True
+    assert results["changed"] == True
 
 API definition with unit test cases
 -----------------------------------
@@ -207,7 +211,7 @@ integration testing section, which run against the actual API. There are several
 where the unit tests are likely to work better.
 
 Defining a module against an API specification
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This case is especially important for modules interacting with web services, which provide
 an API that Ansible uses but which are beyond the control of the user.
@@ -218,7 +222,9 @@ present in the message. This means that we can check that we use the correct
 parameters and nothing else.
 
 
-*Example:  in rds_instance unit tests a simple instance state is defined*::
+*Example:  in rds_instance unit tests a simple instance state is defined*:
+
+.. code-block:: python
 
     def simple_instance_list(status, pending):
         return {u'DBInstances': [{u'DBInstanceArn': 'arn:aws:rds:us-east-1:1234567890:db:fakedb',
@@ -226,7 +232,9 @@ parameters and nothing else.
                                   u'PendingModifiedValues': pending,
                                   u'DBInstanceIdentifier': 'fakedb'}]}
 
-This is then used to create a list of states::
+This is then used to create a list of states:
+
+.. code-block:: python
 
     rds_client_double = MagicMock()
     rds_client_double.describe_db_instances.side_effect = [
@@ -243,7 +251,9 @@ This is then used to create a list of states::
 
 These states are then used as returns from a mock object to ensure that the ``await`` function
 waits through all of the states that would mean the RDS instance has not yet completed
-configuration::
+configuration:
+
+.. code-block:: python
 
    rds_i.await_resource(rds_client_double, "some-instance", "available", mod_mock,
                         await_pending=1)
@@ -254,7 +264,7 @@ potentially unusual that it would be impossible to reliably trigger through the
 integration tests but which happen unpredictably in reality.
 
 Defining a module to work against multiple API versions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This case is especially important for modules interacting with many different versions of
 software; for example, package installation modules that might be expected to work with
@@ -269,8 +279,8 @@ Ansible special cases for unit testing
 
 There are a number of special cases for unit testing the environment of an Ansible module.
 The most common are documented below, and suggestions for others can be found by looking
-at the source code of the existing unit tests or asking on the Ansible IRC channel or mailing
-lists.
+at the source code of the existing unit tests or asking on the Ansible chat channel or mailing
+lists. For more information on joining chat channels and subscribing to mailing lists, see :ref:`communication`.
 
 Module argument processing
 --------------------------
@@ -292,11 +302,13 @@ To pass arguments to a module correctly, use the ``set_module_args`` method whic
 as its parameter. Module creation and argument processing is
 handled through the :class:`AnsibleModule` object in the basic section of the utilities. Normally
 this accepts input on ``STDIN``, which is not convenient for unit testing. When the special
-variable is set it will be treated as if the input came on ``STDIN`` to the module. Simply call that function before setting up your module::
+variable is set it will be treated as if the input came on ``STDIN`` to the module. Simply call that function before setting up your module:
+
+.. code-block:: python
 
     import json
     from units.modules.utils import set_module_args
-    from ansible.module_utils._text import to_bytes
+    from ansible.module_utils.common.text.converters import to_bytes
 
     def test_already_registered(self):
         set_module_args({
@@ -314,7 +326,9 @@ Handling exit correctly
 The :meth:`module.exit_json` function won't work properly in a testing environment since it
 writes error information to ``STDOUT`` upon exit, where it
 is difficult to examine. This can be mitigated by replacing it (and :meth:`module.fail_json`) with
-a function that raises an exception::
+a function that raises an exception:
+
+.. code-block:: python
 
     def exit_json(*args, **kwargs):
         if 'changed' not in kwargs:
@@ -322,7 +336,9 @@ a function that raises an exception::
         raise AnsibleExitJson(kwargs)
 
 Now you can ensure that the first function called is the one you expected simply by
-testing for the correct exception::
+testing for the correct exception:
+
+.. code-block:: python
 
     def test_returned_value(self):
         set_module_args({
@@ -342,7 +358,9 @@ Running the main function
 -------------------------
 
 If you do want to run the actual main function of a module you must import the module, set
-the arguments as above, set up the appropriate exit exception and then run the module::
+the arguments as above, set up the appropriate exit exception and then run the module:
+
+.. code-block:: python
 
     # This test is based around pytest's features for individual test functions
     import pytest
@@ -364,12 +382,14 @@ Handling calls to external executables
 Module must use :meth:`AnsibleModule.run_command` in order to execute an external command. This
 method needs to be mocked:
 
-Here is a simple mock of :meth:`AnsibleModule.run_command` (taken from :file:`test/units/modules/packaging/os/test_rhn_register.py`)::
+Here is a simple mock of :meth:`AnsibleModule.run_command` (taken from :file:`test/units/modules/packaging/os/test_rhn_register.py`):
+
+.. code-block:: python
 
         with patch.object(basic.AnsibleModule, 'run_command') as run_command:
             run_command.return_value = 0, '', ''  # successful execution, no output
                 with self.assertRaises(AnsibleExitJson) as result:
-                    self.module.main()
+                    my_module.main()
                 self.assertFalse(result.exception.args[0]['changed'])
         # Check that run_command has been called
         run_command.assert_called_once_with('/usr/bin/command args')
@@ -381,14 +401,16 @@ A Complete Example
 ------------------
 
 The following example is a complete skeleton that reuses the mocks explained above and adds a new
-mock for :meth:`Ansible.get_bin_path`::
+mock for :meth:`Ansible.get_bin_path`:
+
+.. code-block:: python
 
     import json
 
     from units.compat import unittest
     from units.compat.mock import patch
     from ansible.module_utils import basic
-    from ansible.module_utils._text import to_bytes
+    from ansible.module_utils.common.text.converters import to_bytes
     from ansible.modules.namespace import my_module
 
 
@@ -443,7 +465,7 @@ mock for :meth:`Ansible.get_bin_path`::
         def test_module_fail_when_required_args_missing(self):
             with self.assertRaises(AnsibleFailJson):
                 set_module_args({})
-                self.module.main()
+                my_module.main()
 
 
         def test_ensure_command_called(self):
@@ -470,7 +492,9 @@ Restructuring modules to enable testing module set up and other processes
 
 Often modules have a ``main()`` function which sets up the module and then performs other
 actions. This can make it difficult to check argument processing. This can be made easier by
-moving module configuration and initialization into a separate function. For example::
+moving module configuration and initialization into a separate function. For example:
+
+.. code-block:: python
 
     argument_spec = dict(
         # module function variables
@@ -498,7 +522,9 @@ moving module configuration and initialization into a separate function. For exa
         return_dict = run_task(module, conn)
         module.exit_json(**return_dict)
 
-This now makes it possible to run tests against the module initiation function::
+This now makes it possible to run tests against the module initiation function:
+
+.. code-block:: python
 
     def test_rds_module_setup_fails_if_db_instance_identifier_parameter_missing():
         # db_instance_identifier parameter is missing
@@ -508,7 +534,7 @@ This now makes it possible to run tests against the module initiation function::
          })
 
         with self.assertRaises(AnsibleFailJson) as result:
-            self.module.setup_json
+            my_module.setup_json
 
 See also ``test/units/module_utils/aws/test_rds.py``
 

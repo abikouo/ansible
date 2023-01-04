@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Daniel Hokka Zakrisson <daniel@hozac.com>
@@ -133,11 +132,23 @@ options:
       - All arguments accepted by the M(ansible.builtin.file) module also work here.
     type: str
 extends_documentation_fragment:
+    - action_common_attributes
+    - action_common_attributes.files
     - files
     - validate
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: full
+    platform:
+        platforms: posix
+    safe_file_operations:
+        support: full
+    vault:
+        support: none
 notes:
   - As of Ansible 2.3, the I(dest) option has been changed to I(path) as default, but I(dest) still works as well.
-  - Supports C(check_mode).
 seealso:
 - module: ansible.builtin.blockinfile
 - module: ansible.builtin.copy
@@ -175,7 +186,7 @@ EXAMPLES = r'''
     mode: '0644'
 
 - name: Replace a localhost entry searching for a literal string to avoid escaping
-  lineinfile:
+  ansible.builtin.lineinfile:
     path: /etc/hosts
     search_string: '127.0.0.1'
     line: 127.0.0.1 localhost
@@ -191,7 +202,7 @@ EXAMPLES = r'''
     line: Listen 8080
 
 - name: Ensure php extension matches new pattern
-  lineinfile:
+  ansible.builtin.lineinfile:
     path: /etc/httpd/conf/httpd.conf
     search_string: '<FilesMatch ".php[45]?$">'
     insertafter: '^\t<Location \/>\n'

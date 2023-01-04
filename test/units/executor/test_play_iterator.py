@@ -20,9 +20,9 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 from units.compat import unittest
-from units.compat.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock
 
-from ansible.executor.play_iterator import HostState, PlayIterator
+from ansible.executor.play_iterator import HostState, PlayIterator, IteratingStates, FailedStates
 from ansible.playbook import Playbook
 from ansible.playbook.play_context import PlayContext
 
@@ -37,11 +37,11 @@ class TestPlayIterator(unittest.TestCase):
         hs.tasks_child_state = HostState(blocks=[0])
         hs.rescue_child_state = HostState(blocks=[1])
         hs.always_child_state = HostState(blocks=[2])
-        hs.__repr__()
+        repr(hs)
         hs.run_state = 100
-        hs.__repr__()
+        repr(hs)
         hs.fail_state = 15
-        hs.__repr__()
+        repr(hs)
 
         for i in range(0, 10):
             hs.cur_block = i
@@ -51,7 +51,6 @@ class TestPlayIterator(unittest.TestCase):
 
     @patch('ansible.playbook.role.definition.unfrackpath', mock_unfrackpath_noop)
     def test_play_iterator(self):
-        # import epdb; epdb.st()
         fake_loader = DictDataLoader({
             "test_play.yml": """
             - hosts: all
@@ -429,7 +428,7 @@ class TestPlayIterator(unittest.TestCase):
 
         # iterate past first task
         _, task = itr.get_next_task_for_host(hosts[0])
-        while(task and task.action != 'debug'):
+        while (task and task.action != 'debug'):
             _, task = itr.get_next_task_for_host(hosts[0])
 
         if task is None:
@@ -443,20 +442,20 @@ class TestPlayIterator(unittest.TestCase):
         res_state = itr._insert_tasks_into_state(s_copy, task_list=[])
         self.assertEqual(res_state, s_copy)
 
-        s_copy.fail_state = itr.FAILED_TASKS
+        s_copy.fail_state = FailedStates.TASKS
         res_state = itr._insert_tasks_into_state(s_copy, task_list=[MagicMock()])
         self.assertEqual(res_state, s_copy)
 
         # but if we've failed with a rescue/always block
         mock_task = MagicMock()
-        s_copy.run_state = itr.ITERATING_RESCUE
+        s_copy.run_state = IteratingStates.RESCUE
         res_state = itr._insert_tasks_into_state(s_copy, task_list=[mock_task])
         self.assertEqual(res_state, s_copy)
         self.assertIn(mock_task, res_state._blocks[res_state.cur_block].rescue)
-        itr._host_states[hosts[0].name] = res_state
+        itr.set_state_for_host(hosts[0].name, res_state)
         (next_state, next_task) = itr.get_next_task_for_host(hosts[0], peek=True)
         self.assertEqual(next_task, mock_task)
-        itr._host_states[hosts[0].name] = s
+        itr.set_state_for_host(hosts[0].name, s)
 
         # test a regular insertion
         s_copy = s.copy()

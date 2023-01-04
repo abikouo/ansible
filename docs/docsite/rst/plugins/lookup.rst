@@ -1,18 +1,19 @@
 .. _lookup_plugins:
 
-Lookup Plugins
+Lookup plugins
 ==============
 
 .. contents::
    :local:
    :depth: 2
 
-Lookup plugins are an Ansible-specific extension to the Jinja2 templating language. You can use lookup plugins to access data from outside sources (files, databases, key/value stores, APIs, and other services) within your playbooks. Like all :ref:`templating <playbooks_templating>`, lookups execute and are evaluated on the Ansible control machine. Ansible makes the data returned by a lookup plugin available using the standard templating system. You can use lookup plugins to load variables or templates with information from external sources.
+Lookup plugins are an Ansible-specific extension to the Jinja2 templating language. You can use lookup plugins to access data from outside sources (files, databases, key/value stores, APIs, and other services) within your playbooks. Like all :ref:`templating <playbooks_templating>`, lookups execute and are evaluated on the Ansible control machine. Ansible makes the data returned by a lookup plugin available using the standard templating system. You can use lookup plugins to load variables or templates with information from external sources. You can :ref:`create custom lookup plugins <developing_lookup_plugins>`.
 
 .. note::
    - Lookups are executed with a working directory relative to the role or play,
      as opposed to local tasks, which are executed relative the executed script.
    - Pass ``wantlist=True`` to lookups to use in Jinja2 template "for" loops.
+   - By default, lookup return values are marked as unsafe for security reasons. If you trust the outside source your lookup accesses, pass ``allow_unsafe=True`` to allow Jinja2 templates to evaluate lookup values.
 
 .. warning::
    - Some lookups pass arguments to a shell. When using variables from a remote/untrusted source, use the `|quote` filter to ensure safe usage.
@@ -31,21 +32,25 @@ Ansible enables all lookup plugins it can find. You can activate a custom lookup
 Using lookup plugins
 --------------------
 
-You can use lookup plugins anywhere you can use templating in Ansible: in a play, in variables file, or in a Jinja2 template for the :ref:`template <template_module>` module.
+You can use lookup plugins anywhere you can use templating in Ansible: in a play, in variables file, or in a Jinja2 template for the :ref:`template <template_module>` module. For more information on using lookup plugins, see :ref:`playbooks_lookups`.
 
 .. code-block:: YAML+Jinja
 
   vars:
     file_contents: "{{ lookup('file', 'path/to/file.txt') }}"
 
-Lookups are an integral part of loops. Wherever you see ``with_``, the part after the underscore is the name of a lookup. For this reason, most lookups output lists and take lists as input; for example, ``with_items`` uses the :ref:`items <items_lookup>` lookup::
+Lookups are an integral part of loops. Wherever you see ``with_``, the part after the underscore is the name of a lookup. For this reason, lookups are expected to output lists; for example, ``with_items`` uses the :ref:`items <items_lookup>` lookup:
+
+.. code-block:: YAML+Jinja
 
   tasks:
     - name: count to 3
       debug: msg={{ item }}
       with_items: [1, 2, 3]
 
-You can combine lookups with :ref:`filters <playbooks_filters>`, :ref:`tests <playbooks_tests>` and even each other to do some complex data generation and manipulation. For example::
+You can combine lookups with :ref:`filters <playbooks_filters>`, :ref:`tests <playbooks_tests>` and even each other to do some complex data generation and manipulation. For example:
+
+.. code-block:: YAML+Jinja
 
   tasks:
     - name: valid but useless and over complicated chained lookups and filters
@@ -59,7 +64,9 @@ You can combine lookups with :ref:`filters <playbooks_filters>`, :ref:`tests <pl
 
 You can control how errors behave in all lookup plugins by setting ``errors`` to ``ignore``, ``warn``, or ``strict``. The default setting is ``strict``, which causes the task to fail if the lookup returns an error. For example:
 
-To ignore lookup errors::
+To ignore lookup errors:
+
+.. code-block:: YAML+Jinja
 
     - name: if this file does not exist, I do not care .. file plugin itself warns anyway ...
       debug: msg="{{ lookup('file', '/nosuchfile', errors='ignore') }}"
@@ -73,7 +80,9 @@ To ignore lookup errors::
     }
 
 
-To get a warning instead of a failure::
+To get a warning instead of a failure:
+
+.. code-block:: YAML+Jinja
 
     - name: if this file does not exist, let me know, but continue
       debug: msg="{{ lookup('file', '/nosuchfile', errors='warn') }}"
@@ -89,7 +98,9 @@ To get a warning instead of a failure::
     }
 
 
-To get a fatal error (the default)::
+To get a fatal error (the default):
+
+.. code-block:: YAML+Jinja
 
     - name: if this file does not exist, FAIL (this is the default)
       debug: msg="{{ lookup('file', '/nosuchfile', errors='strict') }}"
@@ -146,13 +157,11 @@ You can use ``ansible-doc -t lookup -l`` to see the list of available plugins. U
        Ansible inventory plugins
    :ref:`callback_plugins`
        Ansible callback plugins
-   :ref:`playbooks_filters`
+   :ref:`filter_plugins`
        Jinja2 filter plugins
-   :ref:`playbooks_tests`
+   :ref:`test_plugins`
        Jinja2 test plugins
-   :ref:`playbooks_lookups`
-       Jinja2 lookup plugins
    `User Mailing List <https://groups.google.com/group/ansible-devel>`_
        Have a question?  Stop by the google group!
-   `irc.freenode.net <http://irc.freenode.net>`_
-       #ansible IRC chat channel
+   :ref:`communication_irc`
+       How to join Ansible chat channels

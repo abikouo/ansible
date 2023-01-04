@@ -7,13 +7,13 @@ Ansible
 Ansible is a radically simple IT automation system. It handles
 configuration management, application deployment, cloud provisioning,
 ad-hoc task execution, network automation, and multi-node orchestration. Ansible makes complex
-changes like zero-downtime rolling updates with load balancers easy. More information on `the Ansible website <https://ansible.com/>`_.
+changes like zero-downtime rolling updates with load balancers easy. More information on the Ansible `website <https://ansible.com/>`_.
 
 Design Principles
 =================
 
-*  Have a dead-simple setup process with a minimal learning curve.
-*  Manage machines very quickly and in parallel.
+*  Have an extremely simple setup process with a minimal learning curve.
+*  Manage machines quickly and in parallel.
 *  Avoid custom-agents and additional open ports, be agentless by
    leveraging the existing SSH daemon.
 *  Describe infrastructure in a language that is both machine and human
@@ -31,8 +31,6 @@ Use Ansible
 You can install a released version of Ansible with ``pip`` or a package manager. See our
 `installation guide <https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html>`_ for details on installing Ansible
 on a variety of platforms.
-
-Red Hat offers supported builds of `Ansible Engine <https://www.ansible.com/ansible-engine>`_.
 
 Power users and developers can run the ``devel`` branch, which has the latest
 features and fixes, directly. Although it is reasonably stable, you are more likely to encounter

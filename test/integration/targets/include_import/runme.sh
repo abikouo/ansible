@@ -17,7 +17,7 @@ ansible -m include_role -a name=role1 localhost
 ## Import (static)
 
 # Playbook
-test "$(ANSIBLE_DEPRECATION_WARNINGS=1 ansible-playbook -i ../../inventory playbook/test_import_playbook.yml "$@" 2>&1 | grep -c '\[DEPRECATION WARNING\]: Additional parameters in import_playbook')" = 1
+ansible-playbook playbook/test_import_playbook.yml -i inventory "$@"
 
 ANSIBLE_STRATEGY='linear' ansible-playbook playbook/test_import_playbook_tags.yml -i inventory "$@" --tags canary1,canary22,validate --skip-tags skipme
 
@@ -126,3 +126,16 @@ ANSIBLE_HOST_PATTERN_MISMATCH=error ansible-playbook empty_group_warning/playboo
 
 ansible-playbook test_include_loop.yml "$@"
 ansible-playbook test_include_loop_fqcn.yml "$@"
+
+ansible-playbook include_role_omit/playbook.yml "$@"
+
+# Test templating import_playbook, import_tasks, and import_role files
+ansible-playbook playbook/test_templated_filenames.yml -e "pb=validate_templated_playbook.yml tasks=validate_templated_tasks.yml tasks_from=templated.yml" "$@" | tee out.txt
+cat out.txt
+test "$(grep out.txt -ce 'In imported playbook')" = 2
+test "$(grep out.txt -ce 'In imported tasks')" = 3
+test "$(grep out.txt -ce 'In imported role')" = 3
+
+# https://github.com/ansible/ansible/issues/73657
+ansible-playbook issue73657.yml 2>&1 | tee issue73657.out
+test "$(grep -c 'SHOULD_NOT_EXECUTE' issue73657.out)" = 0

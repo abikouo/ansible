@@ -19,16 +19,15 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 import ctypes.util
-import errno
 import fcntl
 import getpass
-import locale
 import logging
 import os
 import random
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 
 from struct import unpack, pack
@@ -36,18 +35,14 @@ from termios import TIOCGWINSZ
 
 from ansible import constants as C
 from ansible.errors import AnsibleError, AnsibleAssertionError
-from ansible.module_utils._text import to_bytes, to_text, to_native
-from ansible.module_utils.six import with_metaclass, text_type
+from ansible.module_utils._text import to_bytes, to_text
+from ansible.module_utils.six import text_type
 from ansible.utils.color import stringc
+from ansible.utils.multiprocessing import context as multiprocessing_context
 from ansible.utils.singleton import Singleton
 from ansible.utils.unsafe_proxy import wrap_var
+from functools import wraps
 
-try:
-    # Python 2
-    input = raw_input
-except NameError:
-    # Python 3, we already have raw_input
-    pass
 
 _LIBC = ctypes.cdll.LoadLibrary(ctypes.util.find_library('c'))
 # Set argtypes, to avoid segfault if the wrong type is provided,
@@ -57,24 +52,6 @@ _LIBC.wcswidth.argtypes = (ctypes.c_wchar_p, ctypes.c_int)
 # Max for c_int
 _MAX_INT = 2 ** (ctypes.sizeof(ctypes.c_int) * 8 - 1) - 1
 
-_LOCALE_INITIALIZED = False
-_LOCALE_INITIALIZATION_ERR = None
-
-
-def initialize_locale():
-    """Set the locale to the users default setting
-    and set ``_LOCALE_INITIALIZED`` to indicate whether
-    ``get_text_width`` may run into trouble
-    """
-    global _LOCALE_INITIALIZED, _LOCALE_INITIALIZATION_ERR
-    if _LOCALE_INITIALIZED is False:
-        try:
-            locale.setlocale(locale.LC_ALL, '')
-        except locale.Error as e:
-            _LOCALE_INITIALIZATION_ERR = e
-        else:
-            _LOCALE_INITIALIZED = True
-
 
 def get_text_width(text):
     """Function that utilizes ``wcswidth`` or ``wcwidth`` to determine the
@@ -82,26 +59,10 @@ def get_text_width(text):
 
     We try first with ``wcswidth``, and fallback to iterating each
     character and using wcwidth individually, falling back to a value of 0
-    for non-printable wide characters
-
-    On Py2, this depends on ``locale.setlocale(locale.LC_ALL, '')``,
-    that in the case of Ansible is done in ``bin/ansible``
+    for non-printable wide characters.
     """
     if not isinstance(text, text_type):
         raise TypeError('get_text_width requires text, not %s' % type(text))
-
-    if _LOCALE_INITIALIZATION_ERR:
-        Display().warning(
-            'An error occurred while calling ansible.utils.display.initialize_locale '
-            '(%s). This may result in incorrectly calculated text widths that can '
-            'cause Display to print incorrect line lengths' % _LOCALE_INITIALIZATION_ERR
-        )
-    elif not _LOCALE_INITIALIZED:
-        Display().warning(
-            'ansible.utils.display.initialize_locale has not been called, '
-            'this may result in incorrectly calculated text widths that can '
-            'cause Display to print incorrect line lengths'
-        )
 
     try:
         width = _LIBC.wcswidth(text, _MAX_INT)
@@ -134,10 +95,9 @@ def get_text_width(text):
             w = 0
         width += w
 
-    if width == 0 and counter and not _LOCALE_INITIALIZED:
+    if width == 0 and counter:
         raise EnvironmentError(
-            'ansible.utils.display.initialize_locale has not been called, '
-            'and get_text_width could not calculate text width of %r' % text
+            'get_text_width could not calculate text width of %r' % text
         )
 
     # It doesn't make sense to have a negative printable width
@@ -204,9 +164,34 @@ b_COW_PATHS = (
 )
 
 
-class Display(with_metaclass(Singleton, object)):
+def _synchronize_textiowrapper(tio, lock):
+    # Ensure that a background thread can't hold the internal buffer lock on a file object
+    # during a fork, which causes forked children to hang. We're using display's existing lock for
+    # convenience (and entering the lock before a fork).
+    def _wrap_with_lock(f, lock):
+        @wraps(f)
+        def locking_wrapper(*args, **kwargs):
+            with lock:
+                return f(*args, **kwargs)
+
+        return locking_wrapper
+
+    buffer = tio.buffer
+
+    # monkeypatching the underlying file-like object isn't great, but likely safer than subclassing
+    buffer.write = _wrap_with_lock(buffer.write, lock)
+    buffer.flush = _wrap_with_lock(buffer.flush, lock)
+
+
+class Display(metaclass=Singleton):
 
     def __init__(self, verbosity=0):
+
+        self._final_q = None
+
+        # NB: this lock is used to both prevent intermingled output between threads and to block writes during forks.
+        # Do not change the type of this lock or upgrade to a shared lock (eg multiprocessing.RLock).
+        self._lock = threading.RLock()
 
         self.columns = None
         self.verbosity = verbosity
@@ -225,7 +210,9 @@ class Display(with_metaclass(Singleton, object)):
             try:
                 cmd = subprocess.Popen([self.b_cowsay, "-l"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 (out, err) = cmd.communicate()
-                self.cows_available = set([to_text(c) for c in out.split()])
+                if cmd.returncode:
+                    raise Exception
+                self.cows_available = {to_text(c) for c in out.split()}  # set comprehension
                 if C.ANSIBLE_COW_ACCEPTLIST and any(C.ANSIBLE_COW_ACCEPTLIST):
                     self.cows_available = set(C.ANSIBLE_COW_ACCEPTLIST).intersection(self.cows_available)
             except Exception:
@@ -233,6 +220,23 @@ class Display(with_metaclass(Singleton, object)):
                 self.b_cowsay = False
 
         self._set_column_width()
+
+        try:
+            # NB: we're relying on the display singleton behavior to ensure this only runs once
+            _synchronize_textiowrapper(sys.stdout, self._lock)
+            _synchronize_textiowrapper(sys.stderr, self._lock)
+        except Exception as ex:
+            self.warning(f"failed to patch stdout/stderr for fork-safety: {ex}")
+
+    def set_queue(self, queue):
+        """Set the _final_q on Display, so that we know to proxy display over the queue
+        instead of directly writing to stdout/stderr from forks
+
+        This is only needed in ansible.executor.process.worker:WorkerProcess._run
+        """
+        if multiprocessing_context.parent_process() is None:
+            raise RuntimeError('queue cannot be set in parent process')
+        self._final_q = queue
 
     def set_cowsay_info(self):
         if C.ANSIBLE_NOCOWS:
@@ -251,6 +255,13 @@ class Display(with_metaclass(Singleton, object)):
         Note: msg *must* be a unicode string to prevent UnicodeError tracebacks.
         """
 
+        if self._final_q:
+            # If _final_q is set, that means we are in a WorkerProcess
+            # and instead of displaying messages directly from the fork
+            # we will proxy them through the queue
+            return self._final_q.send_display(msg, color=color, stderr=stderr,
+                                              screen_only=screen_only, log_only=log_only, newline=newline)
+
         nocolor = msg
 
         if not log_only:
@@ -267,13 +278,6 @@ class Display(with_metaclass(Singleton, object)):
             if has_newline or newline:
                 msg2 = msg2 + u'\n'
 
-            msg2 = to_bytes(msg2, encoding=self._output_encoding(stderr=stderr))
-            if sys.version_info >= (3,):
-                # Convert back to text string on python3
-                # We first convert to a byte string so that we get rid of
-                # characters that are invalid in the user's locale
-                msg2 = to_text(msg2, self._output_encoding(stderr=stderr), errors='replace')
-
             # Note: After Display() class is refactored need to update the log capture
             # code in 'bin/ansible-connection' (and other relevant places).
             if not stderr:
@@ -281,24 +285,24 @@ class Display(with_metaclass(Singleton, object)):
             else:
                 fileobj = sys.stderr
 
-            fileobj.write(msg2)
+            with self._lock:
+                fileobj.write(msg2)
 
-            try:
-                fileobj.flush()
-            except IOError as e:
-                # Ignore EPIPE in case fileobj has been prematurely closed, eg.
-                # when piping to "head -n1"
-                if e.errno != errno.EPIPE:
-                    raise
+            # With locks, and the fact that we aren't printing from forks
+            # just write, and let the system flush. Everything should come out peachy
+            # I've left this code for historical purposes, or in case we need to add this
+            # back at a later date. For now ``TaskQueueManager.cleanup`` will perform a
+            # final flush at shutdown.
+            # try:
+            #     fileobj.flush()
+            # except IOError as e:
+            #     # Ignore EPIPE in case fileobj has been prematurely closed, eg.
+            #     # when piping to "head -n1"
+            #     if e.errno != errno.EPIPE:
+            #         raise
 
         if logger and not screen_only:
-            # We first convert to a byte string so that we get rid of
-            # color and characters that are invalid in the user's locale
-            msg2 = to_bytes(nocolor.lstrip(u'\n'))
-
-            if sys.version_info >= (3,):
-                # Convert back to text string on python3
-                msg2 = to_text(msg2, self._output_encoding(stderr=stderr))
+            msg2 = nocolor.lstrip('\n')
 
             lvl = logging.INFO
             if color:
@@ -466,16 +470,10 @@ class Display(with_metaclass(Singleton, object)):
 
     @staticmethod
     def prompt(msg, private=False):
-        prompt_string = to_bytes(msg, encoding=Display._output_encoding())
-        if sys.version_info >= (3,):
-            # Convert back into text on python3.  We do this double conversion
-            # to get rid of characters that are illegal in the user's locale
-            prompt_string = to_text(prompt_string)
-
         if private:
-            return getpass.getpass(prompt_string)
+            return getpass.getpass(msg)
         else:
-            return input(prompt_string)
+            return input(msg)
 
     def do_var_prompt(self, varname, private=True, prompt=None, encrypt=None, confirm=False, salt_size=None, salt=None, default=None, unsafe=None):
 
@@ -519,16 +517,6 @@ class Display(with_metaclass(Singleton, object)):
         if unsafe:
             result = wrap_var(result)
         return result
-
-    @staticmethod
-    def _output_encoding(stderr=False):
-        encoding = locale.getpreferredencoding()
-        # https://bugs.python.org/issue6202
-        # Python2 hardcodes an obsolete value on Mac.  Use MacOSX defaults
-        # instead.
-        if encoding in ('mac-roman',):
-            encoding = 'utf-8'
-        return encoding
 
     def _set_column_width(self):
         if os.isatty(1):

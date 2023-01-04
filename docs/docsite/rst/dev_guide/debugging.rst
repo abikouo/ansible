@@ -83,7 +83,7 @@ The following steps use ``localhost`` as the target host, but you can use the sa
 
     * The ``args`` file contains a JSON string. The string is a dictionary containing the module arguments and other variables that Ansible passes into the module to change its behavior. Modify this file to change the parameters passed to the module.
 
-    * The ``ansible`` directory contains the module code in ``modules`` as well as code from :mod:`ansible.module_utils` that is used by the module. Ansible includes files for any :mod:`ansible.module_utils` imports in the module but not any files from any other module. If your module uses :mod:`ansible.module_utils.url` Ansible will include it for you. But if your module includes `requests <https://requests.readthedocs.io/en/master/api/>`_, then you'll have to make sure that the Python `requests library <https://pypi.org/project/requests/>`_ is installed on the system before running the module.
+    * The ``ansible`` directory contains the module code in ``modules`` as well as code from :mod:`ansible.module_utils` that is used by the module. Ansible includes files for any :mod:`ansible.module_utils` imports in the module but not any files from any other module. If your module uses :mod:`ansible.module_utils.url` Ansible will include it for you. But if your module includes `requests <https://requests.readthedocs.io/en/latest/api/>`_, then you'll have to make sure that the Python `requests library <https://pypi.org/project/requests/>`_ is installed on the system before running the module.
 
     You can modify files in this directory if you suspect that the module is having a problem in some of this boilerplate code rather than in the module code you have written.
 
@@ -94,7 +94,7 @@ The following steps use ``localhost`` as the target host, but you can use the sa
       $ python AnsiballZ_ping.py execute
       {"invocation": {"module_args": {"data": "debugging_session"}}, "changed": false, "ping": "debugging_session"}
 
-    This subcommand inserts the absolute path to ``debug_dir`` as the first item in ``sys.path`` and invokes the script using the arguments in the ``args`` file. You can continue to run the module like this until you understand the problem. Then you can copy the changes back into your real module file and test that the real module works via ``ansible`` or ``ansible-playbook``.
+    This subcommand inserts the absolute path to ``debug_dir`` as the first item in ``sys.path`` and invokes the script using the arguments in the ``args`` file. You can continue to run the module like this until you understand the problem. Then you can copy the changes back into your real module file and test that the real module works by using the ``ansible`` or ``ansible-playbook``.
 
 
 .. _simple_debugging:

@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Jeroen Hoekx <jeroen@hoekx.be>
@@ -98,6 +97,14 @@ options:
       - This overrides the normal error message from a failure to meet the required conditions.
     type: str
     version_added: "2.4"
+extends_documentation_fragment: action_common_attributes
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: none
+    platform:
+        platforms: posix
 notes:
   - The ability to use search_regex with a port connection was added in Ansible 1.7.
   - Prior to Ansible 2.4, testing for the absence of a directory or UNIX socket did not work correctly.
@@ -118,65 +125,65 @@ author:
 
 EXAMPLES = r'''
 - name: Sleep for 300 seconds and continue with play
-  wait_for:
+  ansible.builtin.wait_for:
     timeout: 300
   delegate_to: localhost
 
 - name: Wait for port 8000 to become open on the host, don't start checking for 10 seconds
-  wait_for:
+  ansible.builtin.wait_for:
     port: 8000
     delay: 10
 
 - name: Waits for port 8000 of any IP to close active connections, don't start checking for 10 seconds
-  wait_for:
+  ansible.builtin.wait_for:
     host: 0.0.0.0
     port: 8000
     delay: 10
     state: drained
 
 - name: Wait for port 8000 of any IP to close active connections, ignoring connections for specified hosts
-  wait_for:
+  ansible.builtin.wait_for:
     host: 0.0.0.0
     port: 8000
     state: drained
     exclude_hosts: 10.2.1.2,10.2.1.3
 
 - name: Wait until the file /tmp/foo is present before continuing
-  wait_for:
+  ansible.builtin.wait_for:
     path: /tmp/foo
 
 - name: Wait until the string "completed" is in the file /tmp/foo before continuing
-  wait_for:
+  ansible.builtin.wait_for:
     path: /tmp/foo
     search_regex: completed
 
 - name: Wait until regex pattern matches in the file /tmp/foo and print the matched group
-  wait_for:
+  ansible.builtin.wait_for:
     path: /tmp/foo
     search_regex: completed (?P<task>\w+)
   register: waitfor
-- debug:
+- ansible.builtin.debug:
     msg: Completed {{ waitfor['match_groupdict']['task'] }}
 
 - name: Wait until the lock file is removed
-  wait_for:
+  ansible.builtin.wait_for:
     path: /var/lock/file.lock
     state: absent
 
 - name: Wait until the process is finished and pid was destroyed
-  wait_for:
+  ansible.builtin.wait_for:
     path: /proc/3466/status
     state: absent
 
 - name: Output customized message when failed
-  wait_for:
+  ansible.builtin.wait_for:
     path: /tmp/foo
     state: present
     msg: Timeout to find file /tmp/foo
 
 # Do not assume the inventory_hostname is resolvable and delay 10 seconds at start
 - name: Wait 300 seconds for port 22 to become open and contain "OpenSSH"
-  wait_for:
+  ansible.builtin.wait_for:
     port: 22
     host: '{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}'
     search_regex: OpenSSH
@@ -185,7 +192,7 @@ EXAMPLES = r'''
 
 # Same as above but you normally have ansible_connection set in inventory, which overrides 'connection'
 - name: Wait 300 seconds for port 22 to become open and contain "OpenSSH"
-  wait_for:
+  ansible.builtin.wait_for:
     port: 22
     host: '{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}'
     search_regex: OpenSSH
@@ -201,13 +208,13 @@ elapsed:
   type: int
   sample: 23
 match_groups:
-  description: Tuple containing all the subgroups of the match as returned by U(https://docs.python.org/2/library/re.html#re.MatchObject.groups)
+  description: Tuple containing all the subgroups of the match as returned by U(https://docs.python.org/3/library/re.html#re.MatchObject.groups)
   returned: always
   type: list
   sample: ['match 1', 'match 2']
 match_groupdict:
   description: Dictionary containing all the named subgroups of the match, keyed by the subgroup name,
-    as returned by U(https://docs.python.org/2/library/re.html#re.MatchObject.groupdict)
+    as returned by U(https://docs.python.org/3/library/re.html#re.MatchObject.groupdict)
   returned: always
   type: dict
   sample:
@@ -217,9 +224,11 @@ match_groupdict:
 '''
 
 import binascii
+import contextlib
 import datetime
 import errno
 import math
+import mmap
 import os
 import re
 import select
@@ -229,7 +238,7 @@ import traceback
 
 from ansible.module_utils.basic import AnsibleModule, missing_required_lib
 from ansible.module_utils.common.sys_info import get_platform_subclass
-from ansible.module_utils._text import to_native
+from ansible.module_utils._text import to_bytes
 
 
 HAS_PSUTIL = False
@@ -489,14 +498,22 @@ def main():
     delay = module.params['delay']
     port = module.params['port']
     state = module.params['state']
+
     path = module.params['path']
+    b_path = to_bytes(path, errors='surrogate_or_strict', nonstring='passthru')
+
     search_regex = module.params['search_regex']
+    b_search_regex = to_bytes(search_regex, errors='surrogate_or_strict', nonstring='passthru')
+
     msg = module.params['msg']
 
     if search_regex is not None:
-        compiled_search_re = re.compile(search_regex, re.MULTILINE)
+        try:
+            b_compiled_search_re = re.compile(b_search_regex, re.MULTILINE)
+        except re.error as e:
+            module.fail_json(msg="Invalid regular expression: %s" % e)
     else:
-        compiled_search_re = None
+        b_compiled_search_re = None
 
     match_groupdict = {}
     match_groups = ()
@@ -529,7 +546,7 @@ def main():
         while datetime.datetime.utcnow() < end:
             if path:
                 try:
-                    if not os.access(path, os.F_OK):
+                    if not os.access(b_path, os.F_OK):
                         break
                 except IOError:
                     break
@@ -555,7 +572,7 @@ def main():
         while datetime.datetime.utcnow() < end:
             if path:
                 try:
-                    os.stat(path)
+                    os.stat(b_path)
                 except OSError as e:
                     # If anything except file not present, throw an error
                     if e.errno != 2:
@@ -564,22 +581,20 @@ def main():
                     # file doesn't exist yet, so continue
                 else:
                     # File exists.  Are there additional things to check?
-                    if not compiled_search_re:
+                    if not b_compiled_search_re:
                         # nope, succeed!
                         break
                     try:
-                        f = open(path)
-                        try:
-                            search = re.search(compiled_search_re, f.read())
-                            if search:
-                                if search.groupdict():
-                                    match_groupdict = search.groupdict()
-                                if search.groups():
-                                    match_groups = search.groups()
+                        with open(b_path, 'rb') as f:
+                            with contextlib.closing(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)) as mm:
+                                search = b_compiled_search_re.search(mm)
+                                if search:
+                                    if search.groupdict():
+                                        match_groupdict = search.groupdict()
+                                    if search.groups():
+                                        match_groups = search.groups()
 
-                                break
-                        finally:
-                            f.close()
+                                    break
                     except IOError:
                         pass
             elif port:
@@ -591,12 +606,12 @@ def main():
                     pass
                 else:
                     # Connected -- are there additional conditions?
-                    if compiled_search_re:
-                        data = ''
+                    if b_compiled_search_re:
+                        b_data = b''
                         matched = False
                         while datetime.datetime.utcnow() < end:
                             max_timeout = math.ceil(_timedelta_total_seconds(end - datetime.datetime.utcnow()))
-                            (readable, w, e) = select.select([s], [], [], max_timeout)
+                            readable = select.select([s], [], [], max_timeout)[0]
                             if not readable:
                                 # No new data.  Probably means our timeout
                                 # expired
@@ -605,8 +620,8 @@ def main():
                             if not response:
                                 # Server shutdown
                                 break
-                            data += to_native(response, errors='surrogate_or_strict')
-                            if re.search(compiled_search_re, data):
+                            b_data += response
+                            if b_compiled_search_re.search(b_data):
                                 matched = True
                                 break
 

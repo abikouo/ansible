@@ -25,9 +25,9 @@ import re
 
 from ansible import constants as C
 from units.compat import unittest
-from units.compat.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock, mock_open
 
-from ansible.errors import AnsibleError
+from ansible.errors import AnsibleError, AnsibleAuthenticationFailure
 from ansible.module_utils.six import text_type
 from ansible.module_utils.six.moves import shlex_quote, builtins
 from ansible.module_utils._text import to_bytes
@@ -159,7 +159,8 @@ class TestActionBase(unittest.TestCase):
                 mock_task.args = dict(a=1, foo='fö〩')
                 mock_connection.module_implementation_preferences = ('',)
                 (style, shebang, data, path) = action_base._configure_module(mock_task.action, mock_task.args,
-                                                                             task_vars=dict(ansible_python_interpreter='/usr/bin/python'))
+                                                                             task_vars=dict(ansible_python_interpreter='/usr/bin/python',
+                                                                                            ansible_playbook_python='/usr/bin/python'))
                 self.assertEqual(style, "new")
                 self.assertEqual(shebang, u"#!/usr/bin/python")
 
@@ -282,6 +283,9 @@ class TestActionBase(unittest.TestCase):
         play_context.become = True
         play_context.become_user = 'foo'
 
+        mock_task.become = True
+        mock_task.become_user = True
+
         # our test class
         action_base = DerivedActionBase(
             task=mock_task,
@@ -307,7 +311,6 @@ class TestActionBase(unittest.TestCase):
         # ssh error
         action_base._low_level_execute_command.return_value = dict(rc=255, stdout='', stderr='')
         self.assertRaises(AnsibleError, action_base._make_tmp_path, 'root')
-        play_context.verbosity = 5
         self.assertRaises(AnsibleError, action_base._make_tmp_path, 'root')
 
         # general error
@@ -332,6 +335,9 @@ class TestActionBase(unittest.TestCase):
         remote_paths = ['/tmp/foo/bar.txt', '/tmp/baz.txt']
         remote_user = 'remoteuser1'
 
+        # Used for skipping down to common group dir.
+        CHMOD_ACL_FLAGS = ('+a', 'A+user:remoteuser2:r:allow')
+
         def runWithNoExpectation(execute=False):
             return action_base._fixup_perms2(
                 remote_paths,
@@ -342,7 +348,7 @@ class TestActionBase(unittest.TestCase):
             self.assertEqual(runWithNoExpectation(execute), remote_paths)
 
         def assertThrowRegex(regex, execute=False):
-            self.assertRaisesRegexp(
+            self.assertRaisesRegex(
                 AnsibleError,
                 regex,
                 action_base._fixup_perms2,
@@ -421,7 +427,7 @@ class TestActionBase(unittest.TestCase):
             'stderr': '',
         }
         assertThrowRegex(
-            'Failed to set file mode on remote temporary file',
+            'Failed to set file mode or acl on remote temporary files',
             execute=True)
         action_base._remote_chmod.return_value = {
             'rc': 0,
@@ -455,12 +461,35 @@ class TestActionBase(unittest.TestCase):
             ['remoteuser2 allow read'] + remote_paths,
             '+a')
 
-        # Step 3e: Common group
+        # This case can cause Solaris chmod to return 5 which the ssh plugin
+        # treats as failure. To prevent a regression and ensure we still try the
+        # rest of the cases below, we mock the thrown exception here.
+        # This function ensures that only the macOS case (+a) throws this.
+        def raise_if_plus_a(definitely_not_underscore, mode):
+            if mode == '+a':
+                raise AnsibleAuthenticationFailure()
+            return {'rc': 0, 'stdout': '', 'stderr': ''}
+
+        action_base._remote_chmod.side_effect = raise_if_plus_a
+        assertSuccess()
+
+        # Step 3e: chmod A+ on Solaris
+        # We threw AnsibleAuthenticationFailure above, try Solaris fallback.
+        # Based on our lambda above, it should be successful.
+        action_base._remote_chmod.assert_called_with(
+            remote_paths,
+            'A+user:remoteuser2:r:allow')
+        assertSuccess()
+
+        # Step 3f: Common group
+        def rc_1_if_chmod_acl(definitely_not_underscore, mode):
+            rc = 0
+            if mode in CHMOD_ACL_FLAGS:
+                rc = 1
+            return {'rc': rc, 'stdout': '', 'stderr': ''}
+
         action_base._remote_chmod = MagicMock()
-        action_base._remote_chmod.side_effect = \
-            lambda x, y: \
-            dict(rc=1, stdout='', stderr='') if y == '+a' \
-            else dict(rc=0, stdout='', stderr='')
+        action_base._remote_chmod.side_effect = rc_1_if_chmod_acl
 
         get_shell_option = action_base.get_shell_option
         action_base.get_shell_option = MagicMock()
@@ -476,7 +505,7 @@ class TestActionBase(unittest.TestCase):
             'stderr': '',
         }
         # TODO: Add test to assert warning is shown if
-        # ALLOW_WORLD_READABLE_TMPFILES is set in this case.
+        # world_readable_temp is set in this case.
         assertSuccess()
         action_base._remote_chgrp.assert_called_once_with(
             remote_paths,
@@ -628,6 +657,9 @@ class TestActionBase(unittest.TestCase):
         mock_task = MagicMock()
         mock_task.action = 'copy'
         mock_task.args = dict(a=1, b=2, c=3)
+        mock_task.diff = False
+        mock_task.check_mode = False
+        mock_task.no_log = False
 
         # create a mock connection, so we don't actually try and connect to things
         def build_module_command(env_string, shebang, cmd, arg_path=None):
@@ -702,6 +734,8 @@ class TestActionBase(unittest.TestCase):
 
         play_context.become = True
         play_context.become_user = 'foo'
+        mock_task.become = True
+        mock_task.become_user = True
         self.assertEqual(action_base._execute_module(), dict(_ansible_parsed=True, rc=0, stdout="ok", stdout_lines=['ok']))
 
         # test an invalid shebang return
@@ -713,6 +747,7 @@ class TestActionBase(unittest.TestCase):
         # test with check mode enabled, once with support for check
         # mode and once with support disabled to raise an error
         play_context.check_mode = True
+        mock_task.check_mode = True
         action_base._configure_module.return_value = ('new', '#!/usr/bin/python', 'this is the module data', 'path')
         self.assertEqual(action_base._execute_module(), dict(_ansible_parsed=True, rc=0, stdout="ok", stdout_lines=['ok']))
         action_base._supports_check_mode = False
@@ -751,6 +786,7 @@ class TestActionBase(unittest.TestCase):
     def test__remote_expand_user_relative_pathing(self):
         action_base = _action_base()
         action_base._play_context.remote_addr = 'bar'
+        action_base._connection.get_option.return_value = 'bar'
         action_base._low_level_execute_command = MagicMock(return_value={'stdout': b'../home/user'})
         action_base._connection._shell.join_path.return_value = '../home/user/foo'
         with self.assertRaises(AnsibleError) as cm:

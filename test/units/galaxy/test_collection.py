@@ -11,14 +11,16 @@ import os
 import pytest
 import re
 import tarfile
+import tempfile
 import uuid
 
 from hashlib import sha256
 from io import BytesIO
-from units.compat.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
+import ansible.constants as C
 from ansible import context
-from ansible.cli.galaxy import GalaxyCLI
+from ansible.cli.galaxy import GalaxyCLI, SERVER_DEF
 from ansible.errors import AnsibleError
 from ansible.galaxy import api, collection, token
 from ansible.module_utils._text import to_bytes, to_native, to_text
@@ -26,6 +28,7 @@ from ansible.module_utils.six.moves import builtins
 from ansible.utils import context_objects as co
 from ansible.utils.display import Display
 from ansible.utils.hashing import secure_hash_s
+from ansible.utils.sentinel import Sentinel
 
 
 @pytest.fixture(autouse='function')
@@ -198,6 +201,194 @@ def manifest(manifest_info):
             yield fake_file, sha256(b_data).hexdigest()
 
 
+@pytest.fixture()
+def server_config(monkeypatch):
+    monkeypatch.setattr(C, 'GALAXY_SERVER_LIST', ['server1', 'server2', 'server3'])
+
+    default_options = dict((k, None) for k, v, t in SERVER_DEF)
+
+    server1 = dict(default_options)
+    server1.update({'url': 'https://galaxy.ansible.com/api/', 'validate_certs': False})
+
+    server2 = dict(default_options)
+    server2.update({'url': 'https://galaxy.ansible.com/api/', 'validate_certs': True})
+
+    server3 = dict(default_options)
+    server3.update({'url': 'https://galaxy.ansible.com/api/'})
+
+    return server1, server2, server3
+
+
+@pytest.mark.parametrize(
+    'required_signature_count,valid',
+    [
+        ("1", True),
+        ("+1", True),
+        ("all", True),
+        ("+all", True),
+        ("-1", False),
+        ("invalid", False),
+        ("1.5", False),
+        ("+", False),
+    ]
+)
+def test_cli_options(required_signature_count, valid, monkeypatch):
+    cli_args = [
+        'ansible-galaxy',
+        'collection',
+        'install',
+        'namespace.collection:1.0.0',
+        '--keyring',
+        '~/.ansible/pubring.kbx',
+        '--required-valid-signature-count',
+        required_signature_count
+    ]
+
+    galaxy_cli = GalaxyCLI(args=cli_args)
+    mock_execute_install = MagicMock()
+    monkeypatch.setattr(galaxy_cli, '_execute_install_collection', mock_execute_install)
+
+    if valid:
+        galaxy_cli.run()
+    else:
+        with pytest.raises(SystemExit, match='2') as error:
+            galaxy_cli.run()
+
+
+@pytest.mark.parametrize(
+    "config,server",
+    [
+        (
+            # Options to create ini config
+            {
+                'url': 'https://galaxy.ansible.com',
+                'validate_certs': 'False',
+                'v3': 'False',
+            },
+            # Expected server attributes
+            {
+                'validate_certs': False,
+                '_available_api_versions': {},
+            },
+        ),
+        (
+            {
+                'url': 'https://galaxy.ansible.com',
+                'validate_certs': 'True',
+                'v3': 'True',
+            },
+            {
+                'validate_certs': True,
+                '_available_api_versions': {'v3': '/v3'},
+            },
+        ),
+    ],
+)
+def test_bool_type_server_config_options(config, server, monkeypatch):
+    cli_args = [
+        'ansible-galaxy',
+        'collection',
+        'install',
+        'namespace.collection:1.0.0',
+    ]
+
+    config_lines = [
+        "[galaxy]",
+        "server_list=server1\n",
+        "[galaxy_server.server1]",
+        "url=%s" % config['url'],
+        "v3=%s" % config['v3'],
+        "validate_certs=%s\n" % config['validate_certs'],
+    ]
+
+    with tempfile.NamedTemporaryFile(suffix='.cfg') as tmp_file:
+        tmp_file.write(
+            to_bytes('\n'.join(config_lines))
+        )
+        tmp_file.flush()
+
+        with patch.object(C, 'GALAXY_SERVER_LIST', ['server1']):
+            with patch.object(C.config, '_config_file', tmp_file.name):
+                C.config._parse_config_file()
+                galaxy_cli = GalaxyCLI(args=cli_args)
+                mock_execute_install = MagicMock()
+                monkeypatch.setattr(galaxy_cli, '_execute_install_collection', mock_execute_install)
+                galaxy_cli.run()
+
+    assert galaxy_cli.api_servers[0].name == 'server1'
+    assert galaxy_cli.api_servers[0].validate_certs == server['validate_certs']
+    assert galaxy_cli.api_servers[0]._available_api_versions == server['_available_api_versions']
+
+
+@pytest.mark.parametrize('global_ignore_certs', [True, False])
+def test_validate_certs(global_ignore_certs, monkeypatch):
+    cli_args = [
+        'ansible-galaxy',
+        'collection',
+        'install',
+        'namespace.collection:1.0.0',
+    ]
+    if global_ignore_certs:
+        cli_args.append('--ignore-certs')
+
+    galaxy_cli = GalaxyCLI(args=cli_args)
+    mock_execute_install = MagicMock()
+    monkeypatch.setattr(galaxy_cli, '_execute_install_collection', mock_execute_install)
+    galaxy_cli.run()
+
+    assert len(galaxy_cli.api_servers) == 1
+    assert galaxy_cli.api_servers[0].validate_certs is not global_ignore_certs
+
+
+@pytest.mark.parametrize('global_ignore_certs', [True, False])
+def test_validate_certs_with_server_url(global_ignore_certs, monkeypatch):
+    cli_args = [
+        'ansible-galaxy',
+        'collection',
+        'install',
+        'namespace.collection:1.0.0',
+        '-s',
+        'https://galaxy.ansible.com'
+    ]
+    if global_ignore_certs:
+        cli_args.append('--ignore-certs')
+
+    galaxy_cli = GalaxyCLI(args=cli_args)
+    mock_execute_install = MagicMock()
+    monkeypatch.setattr(galaxy_cli, '_execute_install_collection', mock_execute_install)
+    galaxy_cli.run()
+
+    assert len(galaxy_cli.api_servers) == 1
+    assert galaxy_cli.api_servers[0].validate_certs is not global_ignore_certs
+
+
+@pytest.mark.parametrize('global_ignore_certs', [True, False])
+def test_validate_certs_with_server_config(global_ignore_certs, server_config, monkeypatch):
+
+    # test sidesteps real resolution and forces the server config to override the cli option
+    get_plugin_options = MagicMock(side_effect=server_config)
+    monkeypatch.setattr(C.config, 'get_plugin_options', get_plugin_options)
+
+    cli_args = [
+        'ansible-galaxy',
+        'collection',
+        'install',
+        'namespace.collection:1.0.0',
+    ]
+    if global_ignore_certs:
+        cli_args.append('--ignore-certs')
+
+    galaxy_cli = GalaxyCLI(args=cli_args)
+    mock_execute_install = MagicMock()
+    monkeypatch.setattr(galaxy_cli, '_execute_install_collection', mock_execute_install)
+    galaxy_cli.run()
+
+    # server cfg, so should match def above, if not specified so it should use default (true)
+    assert galaxy_cli.api_servers[0].validate_certs is server_config[0].get('validate_certs', True)
+    assert galaxy_cli.api_servers[1].validate_certs is server_config[1].get('validate_certs', True)
+    assert galaxy_cli.api_servers[2].validate_certs is server_config[2].get('validate_certs', True)
+
+
 def test_build_collection_no_galaxy_yaml():
     fake_path = u'/fake/ÅÑŚÌβŁÈ/path'
     expected = to_native("The collection galaxy.yml path '%s/galaxy.yml' does not exist." % fake_path)
@@ -246,6 +437,45 @@ def test_build_existing_output_with_force(collection_input):
     assert tarfile.is_tarfile(existing_output)
 
 
+def test_build_with_existing_files_and_manifest(collection_input):
+    input_dir, output_dir = collection_input
+
+    with open(os.path.join(input_dir, 'MANIFEST.json'), "wb") as fd:
+        fd.write(b'{"collection_info": {"version": "6.6.6"}, "version": 1}')
+
+    with open(os.path.join(input_dir, 'FILES.json'), "wb") as fd:
+        fd.write(b'{"files": [], "format": 1}')
+
+    with open(os.path.join(input_dir, "plugins", "MANIFEST.json"), "wb") as fd:
+        fd.write(b"test data that should be in build")
+
+    collection.build_collection(to_text(input_dir, errors='surrogate_or_strict'), to_text(output_dir, errors='surrogate_or_strict'), False)
+
+    output_artifact = os.path.join(output_dir, 'ansible_namespace-collection-0.1.0.tar.gz')
+    assert tarfile.is_tarfile(output_artifact)
+
+    with tarfile.open(output_artifact, mode='r') as actual:
+        members = actual.getmembers()
+
+        manifest_file = next(m for m in members if m.path == "MANIFEST.json")
+        manifest_file_obj = actual.extractfile(manifest_file.name)
+        manifest_file_text = manifest_file_obj.read()
+        manifest_file_obj.close()
+        assert manifest_file_text != b'{"collection_info": {"version": "6.6.6"}, "version": 1}'
+
+        json_file = next(m for m in members if m.path == "MANIFEST.json")
+        json_file_obj = actual.extractfile(json_file.name)
+        json_file_text = json_file_obj.read()
+        json_file_obj.close()
+        assert json_file_text != b'{"files": [], "format": 1}'
+
+        sub_manifest_file = next(m for m in members if m.path == "plugins/MANIFEST.json")
+        sub_manifest_file_obj = actual.extractfile(sub_manifest_file.name)
+        sub_manifest_file_text = sub_manifest_file_obj.read()
+        sub_manifest_file_obj.close()
+        assert sub_manifest_file_text == b"test data that should be in build"
+
+
 @pytest.mark.parametrize('galaxy_yml_dir', [b'namespace: value: broken'], indirect=True)
 def test_invalid_yaml_galaxy_file(galaxy_yml_dir):
     galaxy_file = os.path.join(galaxy_yml_dir, b'galaxy.yml')
@@ -260,6 +490,23 @@ def test_missing_required_galaxy_key(galaxy_yml_dir):
     galaxy_file = os.path.join(galaxy_yml_dir, b'galaxy.yml')
     expected = "The collection galaxy.yml at '%s' is missing the following mandatory keys: authors, name, " \
                "readme, version" % to_native(galaxy_file)
+
+    with pytest.raises(AnsibleError, match=expected):
+        collection.concrete_artifact_manager._get_meta_from_src_dir(galaxy_yml_dir)
+
+
+@pytest.mark.parametrize('galaxy_yml_dir', [b'namespace: test_namespace'], indirect=True)
+def test_galaxy_yaml_no_mandatory_keys(galaxy_yml_dir):
+    expected = "The collection galaxy.yml at '%s/galaxy.yml' is missing the " \
+               "following mandatory keys: authors, name, readme, version" % to_native(galaxy_yml_dir)
+
+    with pytest.raises(ValueError, match=expected):
+        assert collection.concrete_artifact_manager._get_meta_from_src_dir(galaxy_yml_dir, require_build_metadata=False) == expected
+
+
+@pytest.mark.parametrize('galaxy_yml_dir', [b'My life story is so very interesting'], indirect=True)
+def test_galaxy_yaml_no_mandatory_keys_bad_yaml(galaxy_yml_dir):
+    expected = "The collection galaxy.yml at '%s/galaxy.yml' is incorrectly formatted." % to_native(galaxy_yml_dir)
 
     with pytest.raises(AnsibleError, match=expected):
         collection.concrete_artifact_manager._get_meta_from_src_dir(galaxy_yml_dir)
@@ -349,7 +596,7 @@ def test_build_ignore_files_and_folders(collection_input, monkeypatch):
         tests_file.write('random')
         tests_file.flush()
 
-    actual = collection._build_files_manifest(to_bytes(input_dir), 'namespace', 'collection', [])
+    actual = collection._build_files_manifest(to_bytes(input_dir), 'namespace', 'collection', [], Sentinel, None)
 
     assert actual['format'] == 1
     for manifest_entry in actual['files']:
@@ -385,7 +632,7 @@ def test_build_ignore_older_release_in_root(collection_input, monkeypatch):
             file_obj.write('random')
             file_obj.flush()
 
-    actual = collection._build_files_manifest(to_bytes(input_dir), 'namespace', 'collection', [])
+    actual = collection._build_files_manifest(to_bytes(input_dir), 'namespace', 'collection', [], Sentinel, None)
     assert actual['format'] == 1
 
     plugin_release_found = False
@@ -412,7 +659,8 @@ def test_build_ignore_patterns(collection_input, monkeypatch):
     monkeypatch.setattr(Display, 'vvv', mock_display)
 
     actual = collection._build_files_manifest(to_bytes(input_dir), 'namespace', 'collection',
-                                              ['*.md', 'plugins/action', 'playbooks/*.j2'])
+                                              ['*.md', 'plugins/action', 'playbooks/*.j2'],
+                                              Sentinel, None)
     assert actual['format'] == 1
 
     expected_missing = [
@@ -463,7 +711,7 @@ def test_build_ignore_symlink_target_outside_collection(collection_input, monkey
     link_path = os.path.join(input_dir, 'plugins', 'connection')
     os.symlink(outside_dir, link_path)
 
-    actual = collection._build_files_manifest(to_bytes(input_dir), 'namespace', 'collection', [])
+    actual = collection._build_files_manifest(to_bytes(input_dir), 'namespace', 'collection', [], Sentinel, None)
     for manifest_entry in actual['files']:
         assert manifest_entry['name'] != 'plugins/connection'
 
@@ -487,7 +735,7 @@ def test_build_copy_symlink_target_inside_collection(collection_input):
 
     os.symlink(roles_target, roles_link)
 
-    actual = collection._build_files_manifest(to_bytes(input_dir), 'namespace', 'collection', [])
+    actual = collection._build_files_manifest(to_bytes(input_dir), 'namespace', 'collection', [], Sentinel, None)
 
     linked_entries = [e for e in actual['files'] if e['name'].startswith('playbooks/roles/linked')]
     assert len(linked_entries) == 1

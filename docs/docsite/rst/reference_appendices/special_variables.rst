@@ -29,7 +29,7 @@ ansible_limit
     Contents of the ``--limit`` CLI option for the current execution of Ansible
 
 ansible_loop
-    A dictionary/map containing extended loop information when enabled via ``loop_control.extended``
+    A dictionary/map containing extended loop information when enabled through ``loop_control.extended``
 
 ansible_loop_var
     The name of the value provided to ``loop_control.loop_var``. Added in ``2.8``
@@ -44,7 +44,7 @@ ansible_parent_role_names
     For example: When role **A** includes role **B**, inside role B, ``ansible_parent_role_names`` will equal to ``['A']``. If role **B** then includes role **C**, the list becomes ``['B', 'A']``.
 
 ansible_parent_role_paths
-    When the current role is being executed by means of an :ref:`include_role <include_role_module>` or :ref:`import_role <import_role_module>` action, this variable contains a list of all parent roles, with the most recent role (in other words, the role that included/imported this role) being the first item in the list.
+    When the current role is being executed by means of an :ref:`include_role <include_role_module>` or :ref:`import_role <import_role_module>` action, this variable contains a list of all parent roles paths, with the most recent role (in other words, the role that included/imported this role) being the first item in the list.
     Please refer to ``ansible_parent_role_names`` for the order of items in this list.
 
 ansible_play_batch
@@ -58,7 +58,7 @@ ansible_play_hosts_all
 
 ansible_play_role_names
     The names of the roles currently imported into the current play. This list does **not** contain the role names that are
-    implicitly included via dependencies.
+    implicitly included through dependencies.
 
 ansible_playbook_python
     The path to the python interpreter being used by Ansible on the controller
@@ -119,7 +119,7 @@ ansible_play_name
     The name of the currently executed play. Added in ``2.8``. (`name` attribute of the play, not file name of the playbook.)
 
 playbook_dir
-    The path to the directory of the playbook that was passed to the ``ansible-playbook`` command line.
+    The path to the directory of the current playbook being executed.  NOTE: This might be different than directory of the playbook passed to the ``ansible-playbook`` command line when a playbook contains a ``import_playbook`` statement. 
 
 role_name
     The name of the role currently being executed.

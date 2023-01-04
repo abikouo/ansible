@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # (c) 2015, Matt Martz <matt@sivel.net>
@@ -57,6 +56,15 @@ options:
 requirements:
   - python >= 2.6
   - pexpect >= 3.3
+extends_documentation_fragment: action_common_attributes
+attributes:
+    check_mode:
+        support: none
+    diff_mode:
+        support: none
+    platform:
+        support: full
+        platforms: posix
 notes:
   - If you want to run a command through the shell (say you are using C(<),
     C(>), C(|), and so on), you must specify a shell in the command such as

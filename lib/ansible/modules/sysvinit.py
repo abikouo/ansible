@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 # (c) 2017, Brian Coca <bcoca@ansible.com>
 # (c) 2017, Adam Miller <admiller@redhat.com>
@@ -66,21 +65,30 @@ options:
               tty or the service dying when the task is over as the connection
               closes the session.
         default: no
+extends_documentation_fragment: action_common_attributes
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: none
+    platform:
+        platforms: posix
 notes:
     - One option other than name is required.
+    - The service names might vary by specific OS/distribution
 requirements:
     - That the service managed has a corresponding init script.
 '''
 
 EXAMPLES = '''
 - name: Make sure apache2 is started
-  sysvinit:
+  ansible.builtin.sysvinit:
       name: apache2
       state: started
       enabled: yes
 
 - name: Make sure apache2 is started on runlevels 3 and 5
-  sysvinit:
+  ansible.builtin.sysvinit:
       name: apache2
       state: started
       enabled: yes

@@ -17,7 +17,8 @@ import tarfile
 import yaml
 
 from io import BytesIO, StringIO
-from units.compat.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from unittest import mock
 
 import ansible.module_utils.six.moves.urllib.error as urllib_error
 
@@ -27,6 +28,7 @@ from ansible.errors import AnsibleError
 from ansible.galaxy import collection, api, dependency_resolution
 from ansible.galaxy.dependency_resolution.dataclasses import Candidate, Requirement
 from ansible.module_utils._text import to_bytes, to_native, to_text
+from ansible.module_utils.common.process import get_bin_path
 from ansible.utils import context_objects as co
 from ansible.utils.display import Display
 
@@ -141,16 +143,16 @@ def collection_artifact(request, tmp_path_factory):
 
     call_galaxy_cli(['init', '%s.%s' % (namespace, collection), '-c', '--init-path', test_dir,
                      '--collection-skeleton', skeleton_path])
-    dependencies = getattr(request, 'param', None)
-    if dependencies:
-        galaxy_yml = os.path.join(collection_path, 'galaxy.yml')
-        with open(galaxy_yml, 'rb+') as galaxy_obj:
-            existing_yaml = yaml.safe_load(galaxy_obj)
-            existing_yaml['dependencies'] = dependencies
+    dependencies = getattr(request, 'param', {})
 
-            galaxy_obj.seek(0)
-            galaxy_obj.write(to_bytes(yaml.safe_dump(existing_yaml)))
-            galaxy_obj.truncate()
+    galaxy_yml = os.path.join(collection_path, 'galaxy.yml')
+    with open(galaxy_yml, 'rb+') as galaxy_obj:
+        existing_yaml = yaml.safe_load(galaxy_obj)
+        existing_yaml['dependencies'] = dependencies
+
+        galaxy_obj.seek(0)
+        galaxy_obj.write(to_bytes(yaml.safe_dump(existing_yaml)))
+        galaxy_obj.truncate()
 
     # Create a file with +x in the collection so we can test the permissions
     execute_path = os.path.join(collection_path, 'runme.sh')
@@ -168,7 +170,85 @@ def collection_artifact(request, tmp_path_factory):
 def galaxy_server():
     context.CLIARGS._store = {'ignore_certs': False}
     galaxy_api = api.GalaxyAPI(None, 'test_server', 'https://galaxy.ansible.com')
+    galaxy_api.get_collection_signatures = MagicMock(return_value=[])
     return galaxy_api
+
+
+def test_concrete_artifact_manager_scm_no_executable(monkeypatch):
+    url = 'https://github.com/org/repo'
+    version = 'commitish'
+    mock_subprocess_check_call = MagicMock()
+    monkeypatch.setattr(collection.concrete_artifact_manager.subprocess, 'check_call', mock_subprocess_check_call)
+    mock_mkdtemp = MagicMock(return_value='')
+    monkeypatch.setattr(collection.concrete_artifact_manager, 'mkdtemp', mock_mkdtemp)
+    mock_get_bin_path = MagicMock(side_effect=[ValueError('Failed to find required executable')])
+    monkeypatch.setattr(collection.concrete_artifact_manager, 'get_bin_path', mock_get_bin_path)
+
+    error = re.escape(
+        "Could not find git executable to extract the collection from the Git repository `https://github.com/org/repo`"
+    )
+    with pytest.raises(AnsibleError, match=error):
+        collection.concrete_artifact_manager._extract_collection_from_git(url, version, b'path')
+
+
+@pytest.mark.parametrize(
+    'url,version,trailing_slash',
+    [
+        ('https://github.com/org/repo', 'commitish', False),
+        ('https://github.com/org/repo,commitish', None, False),
+        ('https://github.com/org/repo/,commitish', None, True),
+        ('https://github.com/org/repo#,commitish', None, False),
+    ]
+)
+def test_concrete_artifact_manager_scm_cmd(url, version, trailing_slash, monkeypatch):
+    mock_subprocess_check_call = MagicMock()
+    monkeypatch.setattr(collection.concrete_artifact_manager.subprocess, 'check_call', mock_subprocess_check_call)
+    mock_mkdtemp = MagicMock(return_value='')
+    monkeypatch.setattr(collection.concrete_artifact_manager, 'mkdtemp', mock_mkdtemp)
+
+    collection.concrete_artifact_manager._extract_collection_from_git(url, version, b'path')
+
+    assert mock_subprocess_check_call.call_count == 2
+
+    repo = 'https://github.com/org/repo'
+    if trailing_slash:
+        repo += '/'
+
+    git_executable = get_bin_path('git')
+    clone_cmd = (git_executable, 'clone', repo, '')
+
+    assert mock_subprocess_check_call.call_args_list[0].args[0] == clone_cmd
+    assert mock_subprocess_check_call.call_args_list[1].args[0] == (git_executable, 'checkout', 'commitish')
+
+
+@pytest.mark.parametrize(
+    'url,version,trailing_slash',
+    [
+        ('https://github.com/org/repo', 'HEAD', False),
+        ('https://github.com/org/repo,HEAD', None, False),
+        ('https://github.com/org/repo/,HEAD', None, True),
+        ('https://github.com/org/repo#,HEAD', None, False),
+        ('https://github.com/org/repo', None, False),
+    ]
+)
+def test_concrete_artifact_manager_scm_cmd_shallow(url, version, trailing_slash, monkeypatch):
+    mock_subprocess_check_call = MagicMock()
+    monkeypatch.setattr(collection.concrete_artifact_manager.subprocess, 'check_call', mock_subprocess_check_call)
+    mock_mkdtemp = MagicMock(return_value='')
+    monkeypatch.setattr(collection.concrete_artifact_manager, 'mkdtemp', mock_mkdtemp)
+
+    collection.concrete_artifact_manager._extract_collection_from_git(url, version, b'path')
+
+    assert mock_subprocess_check_call.call_count == 2
+
+    repo = 'https://github.com/org/repo'
+    if trailing_slash:
+        repo += '/'
+    git_executable = get_bin_path('git')
+    shallow_clone_cmd = (git_executable, 'clone', '--depth=1', repo, '')
+
+    assert mock_subprocess_check_call.call_args_list[0].args[0] == shallow_clone_cmd
+    assert mock_subprocess_check_call.call_args_list[1].args[0] == (git_executable, 'checkout', 'HEAD')
 
 
 def test_build_requirement_from_path(collection_artifact):
@@ -392,7 +472,9 @@ def test_build_requirement_from_name(galaxy_server, monkeypatch, tmp_path_factor
     requirements = cli._require_one_of_collections_requirements(
         collections, requirements_file, artifacts_manager=concrete_artifact_cm
     )['collections']
-    actual = collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, True, False, False)['namespace.collection']
+    actual = collection._resolve_depenency_map(
+        requirements, [galaxy_server], concrete_artifact_cm, None, True, False, False, False, False
+    )['namespace.collection']
 
     assert actual.namespace == u'namespace'
     assert actual.name == u'collection'
@@ -409,7 +491,7 @@ def test_build_requirement_from_name_with_prerelease(galaxy_server, monkeypatch,
     monkeypatch.setattr(galaxy_server, 'get_collection_versions', mock_get_versions)
 
     mock_get_info = MagicMock()
-    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '2.0.1', None, None, {})
+    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '2.0.1', None, None, {}, None, None)
     monkeypatch.setattr(galaxy_server, 'get_collection_version_metadata', mock_get_info)
 
     test_dir = to_bytes(tmp_path_factory.mktemp('test-ÅÑŚÌβŁÈ Collections Input'))
@@ -419,7 +501,9 @@ def test_build_requirement_from_name_with_prerelease(galaxy_server, monkeypatch,
     requirements = cli._require_one_of_collections_requirements(
         ['namespace.collection'], None, artifacts_manager=concrete_artifact_cm
     )['collections']
-    actual = collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, True, False, False)['namespace.collection']
+    actual = collection._resolve_depenency_map(
+        requirements, [galaxy_server], concrete_artifact_cm, None, True, False, False, False, False
+    )['namespace.collection']
 
     assert actual.namespace == u'namespace'
     assert actual.name == u'collection'
@@ -437,7 +521,7 @@ def test_build_requirment_from_name_with_prerelease_explicit(galaxy_server, monk
 
     mock_get_info = MagicMock()
     mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '2.0.1-beta.1', None, None,
-                                                               {})
+                                                               {}, None, None)
     monkeypatch.setattr(galaxy_server, 'get_collection_version_metadata', mock_get_info)
 
     test_dir = to_bytes(tmp_path_factory.mktemp('test-ÅÑŚÌβŁÈ Collections Input'))
@@ -447,7 +531,9 @@ def test_build_requirment_from_name_with_prerelease_explicit(galaxy_server, monk
     requirements = cli._require_one_of_collections_requirements(
         ['namespace.collection:2.0.1-beta.1'], None, artifacts_manager=concrete_artifact_cm
     )['collections']
-    actual = collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, True, False, False)['namespace.collection']
+    actual = collection._resolve_depenency_map(
+        requirements, [galaxy_server], concrete_artifact_cm, None, True, False, False, False, False
+    )['namespace.collection']
 
     assert actual.namespace == u'namespace'
     assert actual.name == u'collection'
@@ -464,7 +550,7 @@ def test_build_requirement_from_name_second_server(galaxy_server, monkeypatch, t
     monkeypatch.setattr(galaxy_server, 'get_collection_versions', mock_get_versions)
 
     mock_get_info = MagicMock()
-    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '1.0.3', None, None, {})
+    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '1.0.3', None, None, {}, None, None)
     monkeypatch.setattr(galaxy_server, 'get_collection_version_metadata', mock_get_info)
 
     broken_server = copy.copy(galaxy_server)
@@ -481,7 +567,7 @@ def test_build_requirement_from_name_second_server(galaxy_server, monkeypatch, t
         ['namespace.collection:>1.0.1'], None, artifacts_manager=concrete_artifact_cm
     )['collections']
     actual = collection._resolve_depenency_map(
-        requirements, [broken_server, galaxy_server], concrete_artifact_cm, None, True, False, False
+        requirements, [broken_server, galaxy_server], concrete_artifact_cm, None, True, False, False, False, False
     )['namespace.collection']
 
     assert actual.namespace == u'namespace'
@@ -512,7 +598,7 @@ def test_build_requirement_from_name_missing(galaxy_server, monkeypatch, tmp_pat
 
     expected = "Failed to resolve the requested dependencies map. Could not satisfy the following requirements:\n* namespace.collection:* (direct request)"
     with pytest.raises(AnsibleError, match=re.escape(expected)):
-        collection._resolve_depenency_map(requirements, [galaxy_server, galaxy_server], concrete_artifact_cm, None, False, True, False)
+        collection._resolve_depenency_map(requirements, [galaxy_server, galaxy_server], concrete_artifact_cm, None, False, True, False, False, False)
 
 
 def test_build_requirement_from_name_401_unauthorized(galaxy_server, monkeypatch, tmp_path_factory):
@@ -532,7 +618,7 @@ def test_build_requirement_from_name_401_unauthorized(galaxy_server, monkeypatch
 
     expected = "error (HTTP Code: 401, Message: msg)"
     with pytest.raises(api.GalaxyError, match=re.escape(expected)):
-        collection._resolve_depenency_map(requirements, [galaxy_server, galaxy_server], concrete_artifact_cm, None, False, False, False)
+        collection._resolve_depenency_map(requirements, [galaxy_server, galaxy_server], concrete_artifact_cm, None, False, False, False, False, False)
 
 
 def test_build_requirement_from_name_single_version(galaxy_server, monkeypatch, tmp_path_factory):
@@ -551,7 +637,7 @@ def test_build_requirement_from_name_single_version(galaxy_server, monkeypatch, 
 
     mock_get_info = MagicMock()
     mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '2.0.0', None, None,
-                                                               {})
+                                                               {}, None, None)
     monkeypatch.setattr(galaxy_server, 'get_collection_version_metadata', mock_get_info)
 
     cli = GalaxyCLI(args=['ansible-galaxy', 'collection', 'install', 'namespace.collection:==2.0.0'])
@@ -559,7 +645,8 @@ def test_build_requirement_from_name_single_version(galaxy_server, monkeypatch, 
         ['namespace.collection:==2.0.0'], None, artifacts_manager=concrete_artifact_cm
     )['collections']
 
-    actual = collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False)['namespace.collection']
+    actual = collection._resolve_depenency_map(
+        requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False, False, False)['namespace.collection']
 
     assert actual.namespace == u'namespace'
     assert actual.name == u'collection'
@@ -587,7 +674,7 @@ def test_build_requirement_from_name_multiple_versions_one_match(galaxy_server, 
 
     mock_get_info = MagicMock()
     mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '2.0.1', None, None,
-                                                               {})
+                                                               {}, None, None)
     monkeypatch.setattr(galaxy_server, 'get_collection_version_metadata', mock_get_info)
 
     cli = GalaxyCLI(args=['ansible-galaxy', 'collection', 'install', 'namespace.collection:>=2.0.1,<2.0.2'])
@@ -595,7 +682,8 @@ def test_build_requirement_from_name_multiple_versions_one_match(galaxy_server, 
         ['namespace.collection:>=2.0.1,<2.0.2'], None, artifacts_manager=concrete_artifact_cm
     )['collections']
 
-    actual = collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False)['namespace.collection']
+    actual = collection._resolve_depenency_map(
+        requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False, False, False)['namespace.collection']
 
     assert actual.namespace == u'namespace'
     assert actual.name == u'collection'
@@ -621,7 +709,7 @@ def test_build_requirement_from_name_multiple_version_results(galaxy_server, mon
     monkeypatch.setattr(dependency_resolution.providers.CollectionDependencyProvider, 'find_matches', mock_find_matches)
 
     mock_get_info = MagicMock()
-    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '2.0.5', None, None, {})
+    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '2.0.5', None, None, {}, None, None)
     monkeypatch.setattr(galaxy_server, 'get_collection_version_metadata', mock_get_info)
 
     mock_get_versions = MagicMock()
@@ -636,7 +724,8 @@ def test_build_requirement_from_name_multiple_version_results(galaxy_server, mon
         ['namespace.collection:!=2.0.2'], None, artifacts_manager=concrete_artifact_cm
     )['collections']
 
-    actual = collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False)['namespace.collection']
+    actual = collection._resolve_depenency_map(
+        requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False, False, False)['namespace.collection']
 
     assert actual.namespace == u'namespace'
     assert actual.name == u'collection'
@@ -655,7 +744,7 @@ def test_candidate_with_conflict(monkeypatch, tmp_path_factory, galaxy_server):
     concrete_artifact_cm = collection.concrete_artifact_manager.ConcreteArtifactsManager(test_dir, validate_certs=False)
 
     mock_get_info = MagicMock()
-    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '2.0.5', None, None, {})
+    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '2.0.5', None, None, {}, None, None)
     monkeypatch.setattr(galaxy_server, 'get_collection_version_metadata', mock_get_info)
 
     mock_get_versions = MagicMock()
@@ -670,7 +759,7 @@ def test_candidate_with_conflict(monkeypatch, tmp_path_factory, galaxy_server):
     expected = "Failed to resolve the requested dependencies map. Could not satisfy the following requirements:\n"
     expected += "* namespace.collection:!=2.0.5 (direct request)"
     with pytest.raises(AnsibleError, match=re.escape(expected)):
-        collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False)
+        collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False, False, False)
 
 
 def test_dep_candidate_with_conflict(monkeypatch, tmp_path_factory, galaxy_server):
@@ -678,8 +767,8 @@ def test_dep_candidate_with_conflict(monkeypatch, tmp_path_factory, galaxy_serve
     concrete_artifact_cm = collection.concrete_artifact_manager.ConcreteArtifactsManager(test_dir, validate_certs=False)
 
     mock_get_info_return = [
-        api.CollectionVersionMetadata('parent', 'collection', '2.0.5', None, None, {'namespace.collection': '!=1.0.0'}),
-        api.CollectionVersionMetadata('namespace', 'collection', '1.0.0', None, None, {}),
+        api.CollectionVersionMetadata('parent', 'collection', '2.0.5', None, None, {'namespace.collection': '!=1.0.0'}, None, None),
+        api.CollectionVersionMetadata('namespace', 'collection', '1.0.0', None, None, {}, None, None),
     ]
     mock_get_info = MagicMock(side_effect=mock_get_info_return)
     monkeypatch.setattr(galaxy_server, 'get_collection_version_metadata', mock_get_info)
@@ -695,12 +784,12 @@ def test_dep_candidate_with_conflict(monkeypatch, tmp_path_factory, galaxy_serve
     expected = "Failed to resolve the requested dependencies map. Could not satisfy the following requirements:\n"
     expected += "* namespace.collection:!=1.0.0 (dependency of parent.collection:2.0.5)"
     with pytest.raises(AnsibleError, match=re.escape(expected)):
-        collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False)
+        collection._resolve_depenency_map(requirements, [galaxy_server], concrete_artifact_cm, None, False, True, False, False, False)
 
 
 def test_install_installed_collection(monkeypatch, tmp_path_factory, galaxy_server):
 
-    mock_installed_collections = MagicMock(return_value=[Candidate('namespace.collection', '1.2.3', None, 'dir')])
+    mock_installed_collections = MagicMock(return_value=[Candidate('namespace.collection', '1.2.3', None, 'dir', None)])
 
     monkeypatch.setattr(collection, 'find_existing_collections', mock_installed_collections)
 
@@ -711,7 +800,7 @@ def test_install_installed_collection(monkeypatch, tmp_path_factory, galaxy_serv
     monkeypatch.setattr(Display, 'display', mock_display)
 
     mock_get_info = MagicMock()
-    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '1.2.3', None, None, {})
+    mock_get_info.return_value = api.CollectionVersionMetadata('namespace', 'collection', '1.2.3', None, None, {}, None, None)
     monkeypatch.setattr(galaxy_server, 'get_collection_version_metadata', mock_get_info)
 
     mock_get_versions = MagicMock(return_value=['1.2.3', '1.3.0'])
@@ -738,7 +827,7 @@ def test_install_collection(collection_artifact, monkeypatch):
     collection_path = os.path.join(output_path, b'ansible_namespace', b'collection')
     os.makedirs(os.path.join(collection_path, b'delete_me'))  # Create a folder to verify the install cleans out the dir
 
-    candidate = Candidate('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file')
+    candidate = Candidate('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file', None)
     collection.install(candidate, to_text(output_path), concrete_artifact_cm)
 
     # Ensure the temp directory is empty, nothing is left behind
@@ -777,7 +866,7 @@ def test_install_collection_with_download(galaxy_server, collection_artifact, mo
     mock_download.return_value = collection_tar
     monkeypatch.setattr(concrete_artifact_cm, 'get_galaxy_artifact_path', mock_download)
 
-    req = Requirement('ansible_namespace.collection', '0.1.0', 'https://downloadme.com', 'galaxy')
+    req = Candidate('ansible_namespace.collection', '0.1.0', 'https://downloadme.com', 'galaxy', None)
     collection.install(req, to_text(collections_dir), concrete_artifact_cm)
 
     actual_files = os.listdir(collection_path)
@@ -805,8 +894,8 @@ def test_install_collections_from_tar(collection_artifact, monkeypatch):
 
     concrete_artifact_cm = collection.concrete_artifact_manager.ConcreteArtifactsManager(temp_path, validate_certs=False)
 
-    requirements = [Requirement('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file')]
-    collection.install_collections(requirements, to_text(temp_path), [], False, False, False, False, False, False, concrete_artifact_cm)
+    requirements = [Requirement('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file', None)]
+    collection.install_collections(requirements, to_text(temp_path), [], False, False, False, False, False, False, concrete_artifact_cm, True, False)
 
     assert os.path.isdir(collection_path)
 
@@ -841,8 +930,8 @@ def test_install_collections_existing_without_force(collection_artifact, monkeyp
 
     assert os.path.isdir(collection_path)
 
-    requirements = [Requirement('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file')]
-    collection.install_collections(requirements, to_text(temp_path), [], False, False, False, False, False, False, concrete_artifact_cm)
+    requirements = [Requirement('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file', None)]
+    collection.install_collections(requirements, to_text(temp_path), [], False, False, False, False, False, False, concrete_artifact_cm, True, False)
 
     assert os.path.isdir(collection_path)
 
@@ -873,8 +962,8 @@ def test_install_missing_metadata_warning(collection_artifact, monkeypatch):
             os.unlink(b_path)
 
     concrete_artifact_cm = collection.concrete_artifact_manager.ConcreteArtifactsManager(temp_path, validate_certs=False)
-    requirements = [Requirement('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file')]
-    collection.install_collections(requirements, to_text(temp_path), [], False, False, False, False, False, False, concrete_artifact_cm)
+    requirements = [Requirement('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file', None)]
+    collection.install_collections(requirements, to_text(temp_path), [], False, False, False, False, False, False, concrete_artifact_cm, True, False)
 
     display_msgs = [m[1][0] for m in mock_display.mock_calls if 'newline' not in m[2] and len(m[1]) == 1]
 
@@ -894,8 +983,8 @@ def test_install_collection_with_circular_dependency(collection_artifact, monkey
     monkeypatch.setattr(Display, 'display', mock_display)
 
     concrete_artifact_cm = collection.concrete_artifact_manager.ConcreteArtifactsManager(temp_path, validate_certs=False)
-    requirements = [Requirement('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file')]
-    collection.install_collections(requirements, to_text(temp_path), [], False, False, False, False, False, False, concrete_artifact_cm)
+    requirements = [Requirement('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file', None)]
+    collection.install_collections(requirements, to_text(temp_path), [], False, False, False, False, False, False, concrete_artifact_cm, True, False)
 
     assert os.path.isdir(collection_path)
 
@@ -910,6 +999,7 @@ def test_install_collection_with_circular_dependency(collection_artifact, monkey
     assert actual_manifest['collection_info']['namespace'] == 'ansible_namespace'
     assert actual_manifest['collection_info']['name'] == 'collection'
     assert actual_manifest['collection_info']['version'] == '0.1.0'
+    assert actual_manifest['collection_info']['dependencies'] == {'ansible_namespace.collection': '>=0.0.1'}
 
     # Filter out the progress cursor display calls.
     display_msgs = [m[1][0] for m in mock_display.mock_calls if 'newline' not in m[2] and len(m[1]) == 1]
@@ -918,3 +1008,74 @@ def test_install_collection_with_circular_dependency(collection_artifact, monkey
     assert display_msgs[1] == "Starting collection install process"
     assert display_msgs[2] == "Installing 'ansible_namespace.collection:0.1.0' to '%s'" % to_text(collection_path)
     assert display_msgs[3] == "ansible_namespace.collection:0.1.0 was installed successfully"
+
+
+@pytest.mark.parametrize('collection_artifact', [
+    None,
+    {},
+], indirect=True)
+def test_install_collection_with_no_dependency(collection_artifact, monkeypatch):
+    collection_path, collection_tar = collection_artifact
+    temp_path = os.path.split(collection_tar)[0]
+    shutil.rmtree(collection_path)
+
+    concrete_artifact_cm = collection.concrete_artifact_manager.ConcreteArtifactsManager(temp_path, validate_certs=False)
+    requirements = [Requirement('ansible_namespace.collection', '0.1.0', to_text(collection_tar), 'file', None)]
+    collection.install_collections(requirements, to_text(temp_path), [], False, False, False, False, False, False, concrete_artifact_cm, True, False)
+
+    assert os.path.isdir(collection_path)
+
+    with open(os.path.join(collection_path, b'MANIFEST.json'), 'rb') as manifest_obj:
+        actual_manifest = json.loads(to_text(manifest_obj.read()))
+
+    assert not actual_manifest['collection_info']['dependencies']
+    assert actual_manifest['collection_info']['namespace'] == 'ansible_namespace'
+    assert actual_manifest['collection_info']['name'] == 'collection'
+    assert actual_manifest['collection_info']['version'] == '0.1.0'
+
+
+@pytest.mark.parametrize(
+    "signatures,required_successful_count,ignore_errors,expected_success",
+    [
+        ([], 'all', [], True),
+        (["good_signature"], 'all', [], True),
+        (["good_signature", collection.gpg.GpgBadArmor(status='failed')], 'all', [], False),
+        ([collection.gpg.GpgBadArmor(status='failed')], 'all', [], False),
+        # This is expected to succeed because ignored does not increment failed signatures.
+        # "all" signatures is not a specific number, so all == no (non-ignored) signatures in this case.
+        ([collection.gpg.GpgBadArmor(status='failed')], 'all', ["BADARMOR"], True),
+        ([collection.gpg.GpgBadArmor(status='failed'), "good_signature"], 'all', ["BADARMOR"], True),
+        ([], '+all', [], False),
+        ([collection.gpg.GpgBadArmor(status='failed')], '+all', ["BADARMOR"], False),
+        ([], '1', [], True),
+        ([], '+1', [], False),
+        (["good_signature"], '2', [], False),
+        (["good_signature", collection.gpg.GpgBadArmor(status='failed')], '2', [], False),
+        # This is expected to fail because ignored does not increment successful signatures.
+        # 2 signatures are required, but only 1 is successful.
+        (["good_signature", collection.gpg.GpgBadArmor(status='failed')], '2', ["BADARMOR"], False),
+        (["good_signature", "good_signature"], '2', [], True),
+    ]
+)
+def test_verify_file_signatures(signatures, required_successful_count, ignore_errors, expected_success):
+    # type: (List[bool], int, bool, bool) -> None
+
+    def gpg_error_generator(results):
+        for result in results:
+            if isinstance(result, collection.gpg.GpgBaseError):
+                yield result
+
+    fqcn = 'ns.coll'
+    manifest_file = 'MANIFEST.json'
+    keyring = '~/.ansible/pubring.kbx'
+
+    with patch.object(collection, 'run_gpg_verify', MagicMock(return_value=("somestdout", 0,))):
+        with patch.object(collection, 'parse_gpg_errors', MagicMock(return_value=gpg_error_generator(signatures))):
+            assert collection.verify_file_signatures(
+                fqcn,
+                manifest_file,
+                signatures,
+                keyring,
+                required_successful_count,
+                ignore_errors
+            ) == expected_success

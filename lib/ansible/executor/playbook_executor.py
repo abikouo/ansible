@@ -23,7 +23,7 @@ import os
 
 from ansible import constants as C
 from ansible import context
-from ansible.executor.task_queue_manager import TaskQueueManager
+from ansible.executor.task_queue_manager import TaskQueueManager, AnsibleEndPlay
 from ansible.module_utils._text import to_text
 from ansible.module_utils.parsing.convert_bool import boolean
 from ansible.plugins.loader import become_loader, connection_loader, shell_loader
@@ -99,11 +99,11 @@ class PlaybookExecutor:
                     playbook_collection = resource[2]
                 else:
                     playbook_path = playbook
-                    # not fqcn, but might still be colleciotn playbook
+                    # not fqcn, but might still be collection playbook
                     playbook_collection = _get_collection_name_from_path(playbook)
 
                 if playbook_collection:
-                    display.warning("running playbook inside collection {0}".format(playbook_collection))
+                    display.v("running playbook inside collection {0}".format(playbook_collection))
                     AnsibleCollectionConfig.default_collection = playbook_collection
                 else:
                     AnsibleCollectionConfig.default_collection = None
@@ -186,7 +186,11 @@ class PlaybookExecutor:
                             # restrict the inventory to the hosts in the serialized batch
                             self._inventory.restrict_to_hosts(batch)
                             # and run it...
-                            result = self._tqm.run(play=play)
+                            try:
+                                result = self._tqm.run(play=play)
+                            except AnsibleEndPlay as e:
+                                result = e.result
+                                break
 
                             # break the play if the result equals the special return code
                             if result & self._tqm.RUN_FAILED_BREAK_PLAY != 0:

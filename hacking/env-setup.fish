@@ -5,6 +5,7 @@ set HACKING_DIR (dirname (status -f))
 set FULL_PATH (python -c "import os; print(os.path.realpath('$HACKING_DIR'))")
 set ANSIBLE_HOME (dirname $FULL_PATH)
 set PREFIX_PYTHONPATH $ANSIBLE_HOME/lib
+set ANSIBLE_TEST_PREFIX_PYTHONPATH $ANSIBLE_HOME/test/lib
 set PREFIX_PATH $ANSIBLE_HOME/bin
 set PREFIX_MANPATH $ANSIBLE_HOME/docs/man
 
@@ -31,6 +32,16 @@ else
     end
 end
 
+# Set ansible_test PYTHONPATH
+switch PYTHONPATH
+    case "$ANSIBLE_TEST_PREFIX_PYTHONPATH*"
+    case "*"
+        if not [ $QUIET ]
+            echo "Appending PYTHONPATH"
+        end
+        set -gx PYTHONPATH "$ANSIBLE_TEST_PREFIX_PYTHONPATH:$PYTHONPATH"
+end
+
 # Set PATH
 if not contains $PREFIX_PATH $PATH
     set -gx PATH $PREFIX_PATH $PATH
@@ -47,10 +58,10 @@ end
 
 # Set PYTHON_BIN
 if not set -q PYTHON_BIN
-    if test (which python)
-        set -gx PYTHON_BIN (which python)
-    else if test (which python3)
+    if test (which python3)
         set -gx PYTHON_BIN (which python3)
+    else if test (which python)
+        set -gx PYTHON_BIN (which python)
     else
         echo "No valid Python found"
         exit 1
@@ -69,20 +80,15 @@ function gen_egg_info
         rm -rf $PREFIX_PYTHONPATH/ansible*.egg-info
     end
 
-    if [ $QUIET ]
-        set options '-q'
-    end
-
-    eval $PYTHON_BIN setup.py $options egg_info
-
+    eval $PYTHON_BIN setup.py egg_info
 end
 
 
 pushd $ANSIBLE_HOME
 
 if [ $QUIET ]
-    gen_egg_info ^ /dev/null
-    find . -type f -name "*.pyc" -exec rm -f '{}' ';' ^ /dev/null
+    gen_egg_info &> /dev/null
+    find . -type f -name "*.pyc" -exec rm -f '{}' ';' &> /dev/null
 else
     gen_egg_info
     find . -type f -name "*.pyc" -exec rm -f '{}' ';'

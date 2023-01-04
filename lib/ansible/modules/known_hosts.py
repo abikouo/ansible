@@ -1,4 +1,3 @@
-#!/usr/bin/python
 
 # Copyright: (c) 2014, Matthew Vernon <mcv21@cam.ac.uk>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
@@ -34,12 +33,13 @@ options:
       - Specifically, the key should not match the format that is found in an SSH pubkey file, but should rather have the hostname prepended to a
         line that includes the pubkey, the same way that it would appear in the known_hosts file. The value prepended to the line must also match
         the value of the name parameter.
-      - Should be of format `<hostname[,IP]> ssh-rsa <pubkey>`.
+      - Should be of format C(<hostname[,IP]> ssh-rsa <pubkey>).
       - For custom SSH port, C(key) needs to specify port as well. See example section.
     type: str
   path:
     description:
       - The known_hosts file to edit.
+      - The known_hosts file will be created if needed. The rest of the path must exist prior to running the module.
     default: "~/.ssh/known_hosts"
     type: path
   hash_host:
@@ -55,26 +55,35 @@ options:
     choices: [ "absent", "present" ]
     default: "present"
     type: str
+attributes:
+  check_mode:
+    support: full
+  diff_mode:
+    support: full
+  platform:
+    platforms: posix
+extends_documentation_fragment:
+  - action_common_attributes
 author:
 - Matthew Vernon (@mcv21)
 '''
 
 EXAMPLES = r'''
 - name: Tell the host about our servers it might want to ssh to
-  known_hosts:
+  ansible.builtin.known_hosts:
     path: /etc/ssh/ssh_known_hosts
     name: foo.com.invalid
-    key: "{{ lookup('file', 'pubkeys/foo.com.invalid') }}"
+    key: "{{ lookup('ansible.builtin.file', 'pubkeys/foo.com.invalid') }}"
 
 - name: Another way to call known_hosts
-  known_hosts:
+  ansible.builtin.known_hosts:
     name: host1.example.com   # or 10.9.8.77
     key: host1.example.com,10.9.8.77 ssh-rsa ASDeararAIUHI324324  # some key gibberish
     path: /etc/ssh/ssh_known_hosts
     state: present
 
 - name: Add host with custom SSH port
-  known_hosts:
+  ansible.builtin.known_hosts:
     name: '[host1.example.com]:2222'
     key: '[host1.example.com]:2222 ssh-rsa ASDeararAIUHI324324' # some key gibberish
     path: /etc/ssh/ssh_known_hosts
@@ -102,7 +111,6 @@ import re
 import tempfile
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.file import FileLock
 from ansible.module_utils._text import to_bytes, to_native
 
 
@@ -134,6 +142,12 @@ def enforce_state(module, params):
     found, replace_or_add, found_line = search_for_host_key(module, host, key, path, sshkeygen)
 
     params['diff'] = compute_diff(path, found_line, replace_or_add, state, key)
+
+    # check if we are trying to remove a non matching key,
+    # in that case return with no change to the host
+    if state == 'absent' and not found_line and key:
+        params['changed'] = False
+        return params
 
     # We will change state if found==True & state!="present"
     # or found==False & state=="present"

@@ -74,32 +74,35 @@ Setting up your environment to build documentation locally
 
 To build documentation locally, ensure you have a working :ref:`development environment <environment_setup>`.
 
-To work with documentation on your local machine, you need to have python-3.5 or greater and the
-following packages installed:
+To work with documentation on your local machine, you need to have python-3.9 or greater and install the `Ansible dependencies`_ and `documentation dependencies`_, which are listed in two files to make installation easier:
 
-- gcc
-- jinja2
-- libyaml
-- Pygments >= 2.4.0
-- pyparsing
-- PyYAML
-- rstcheck
-- six
-- sphinx
-- sphinx-notfound-page
-- straight.plugin
-
-These required packages are listed in two :file:`requirements.txt` files to make installation easier:
+.. _Ansible dependencies: https://github.com/ansible/ansible/blob/devel/requirements.txt
+.. _documentation dependencies: https://github.com/ansible/ansible/blob/devel/docs/docsite/requirements.txt
 
 .. code-block:: bash
 
     pip install --user -r requirements.txt
     pip install --user -r docs/docsite/requirements.txt
 
-You can drop ``--user`` if you have set up a virtual environment (venv/virtenv).
+The :file:`docs/docsite/requirements.txt` file allows a wide range of versions and may install new releases of required packages. New releases of these packages may cause problems with the Ansible docs build. If you want to install tested versions of these dependencies, use :file:`test/sanity/code-smell/docs-build.requirements.txt` instead, which matches the dependencies used by CI:
+
+.. code-block:: bash
+
+    pip install --user -r requirements.txt
+    pip install --user -r test/sanity/code-smell/docs-build.requirements.txt
+
+
+
+You can drop ``--user`` if you have set up a virtual environment (venv/virtenv). 
 
 .. note::
 
+    You may need to install these general pre-requisites separately on some systems:
+    - ``gcc``
+    - ``libyaml``
+    - ``make``
+    - ``pyparsing``
+    - ``six``
     On macOS with Xcode, you may need to install ``six`` and ``pyparsing`` with ``--ignore-installed`` to get versions that work with ``sphinx``.
 
 .. note::
@@ -121,6 +124,12 @@ Building the documentation locally
 ----------------------------------
 
 Building the documentation is the best way to check for errors and review your changes. Once `rstcheck` runs with no errors, navigate to ``ansible/docs/docsite`` and then build the page(s) you want to review.
+
+ .. note::
+
+    If building on macOS with Python 3.8 or later, you must use Sphinx >= 2.2.2. See `#6803 <https://github.com/sphinx-doc/sphinx/pull/6879>`_ for details.
+
+
 
 Building a single rST page
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -206,7 +215,7 @@ Unfortunately, leftover rST-files from previous document-generating can occasion
 Joining the documentation working group
 =======================================
 
-The Documentation Working Group (DaWGs) meets weekly on Tuesdays on the #ansible-docs channel on freenode IRC. For more information, including links to our agenda and a calendar invite, please visit the `working group page in the community repo <https://github.com/ansible/community/wiki/Docs>`_.
+The Documentation Working Group (DaWGs) meets weekly on Tuesdays in the Docs chat (using `Matrix <https://matrix.to/#/#docs:ansible.im>`_ or using IRC at `irc.libera.chat <https://libera.chat/>`_). For more information, including links to our agenda and a calendar invite, please visit the `working group page in the community repo <https://github.com/ansible/community/wiki/Docs>`_.
 
 .. seealso::
    :ref:`More about testing module documentation <testing_module_documentation>`

@@ -44,7 +44,7 @@ body:
 
 
       **HINT:** Did you know the documentation has a `View on GitHub`
-      link on every page? Feel free to use it to start a pull request
+      link on some pages? Feel free to use it to start a pull request
       right from the GitHub UI!
     placeholder: >-
       I was reading the ansible-core documentation of version X and I'm having
@@ -106,7 +106,7 @@ body:
     label: Ansible Version
     description: >-
       Paste verbatim output from `ansible --version` below, under
-      the prompt line. Please don't wrap it with tripple backticks — your
+      the prompt line. Please don't wrap it with triple backticks — your
       whole input will be turned into a code snippet automatically.
     render: console
     value: |
@@ -129,15 +129,17 @@ body:
   attributes:
     label: Configuration
     description: >-
-      Paste verbatim output from `ansible-config dump --only-changed`
-      below, under the prompt line.
-      Please don't wrap it with tripple backticks — your
+      Paste verbatim output from `ansible-config dump --only-changed -t all` below, under the prompt line.
+      (if using a version older than ansible-core 2.12 you should omit the '-t all')
+      Please don't wrap it with triple backticks — your
       whole input will be turned into a code snippet automatically.
     render: console
     value: |
-      $ ansible-config dump --only-changed
+      # if using a version older than ansible-core 2.12 you should omit the '-t all'
+      $ ansible-config dump --only-changed -t all
     placeholder: |
-      $ ansible-config dump --only-changed
+      # if using a version older than ansible-core 2.12 you should omit the '-t all'
+      $ ansible-config dump --only-changed -t all
       DEFAULT_GATHERING(~/src/github/ansible/ansible/ansible.cfg) = smart
       DEFAULT_HOST_LIST(~/src/github/ansible/ansible/ansible.cfg) = ['~/src/github/ansible/ansible/hosts']
       DEFAULT_VAULT_PASSWORD_FILE(~/src/github/ansible/ansible/ansible.cfg) = ~/src/github/ansible/ansible/vault/print-password.sh

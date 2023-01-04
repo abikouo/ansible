@@ -1,14 +1,13 @@
 .. _inventory_plugins:
 
-Inventory Plugins
+Inventory plugins
 =================
 
 .. contents::
    :local:
    :depth: 2
 
-Inventory plugins allow users to point at data sources to compile the inventory of hosts that Ansible uses to target tasks, either using the ``-i /path/to/file`` and/or ``-i 'host1, host2'`` command line parameters or from other configuration sources.
-
+Inventory plugins allow users to point at data sources to compile the inventory of hosts that Ansible uses to target tasks, either using the ``-i /path/to/file`` and/or ``-i 'host1, host2'`` command line parameters or from other configuration sources. If necessary, you can :ref:`create custom inventory plugins <developing_inventory_plugins>`.
 
 .. _enabling_inventory:
 
@@ -24,13 +23,21 @@ In some circumstances, for example, if the inventory plugin does not use a YAML 
    [inventory]
    enable_plugins = host_list, script, auto, yaml, ini, toml
 
-If the plugin is in a collection, use the fully qualified name:
+If the plugin is in a collection and is not being picked up by the `auto` statement, you can append the fully qualified name:
 
 .. code-block:: ini
 
    [inventory]
-   enable_plugins = namespace.collection_name.inventory_plugin_name
+   enable_plugins = host_list, script, auto, yaml, ini, toml, namespace.collection_name.inventory_plugin_name
 
+Or, if it is a local plugin, perhaps stored in the path set by :ref:`DEFAULT_INVENTORY_PLUGIN_PATH`, you could reference it as follows:
+
+.. code-block:: ini
+
+   [inventory]
+   enable_plugins = host_list, script, auto, yaml, ini, toml, my_plugin
+   
+If you use a plugin that supports a YAML configuration source, make sure that the name matches the name provided in the ``plugin`` entry of the inventory source file.
 
 .. _using_inventory:
 
@@ -80,12 +87,24 @@ You can create dynamic groups using host variables with the constructed ``keyed_
       - key: tags.Name
         prefix: tag_Name_
         separator: ""
+      # If you have a tag called "Role" which has the value "Webserver", this will add the group
+      # role_Webserver and add any hosts that have that tag assigned to it.
+      - key: tags.Role
+        prefix: role
     groups:
       # add hosts to the group development if any of the dictionary's keys or values is the word 'devel'
       development: "'devel' in (tags|list)"
+      # add hosts to the "private_only" group if the host doesn't have a public IP associated to it
+      private_only: "public_ip_address is not defined"
     compose:
-      # set the ansible_host variable to connect with the private IP address without changing the hostname
-      ansible_host: private_ip_address
+      # use a private address where a public one isn't assigned
+      ansible_host: public_ip_address|default(private_ip_address)
+      # alternatively, set the ansible_host variable to connect with the private IP address without changing the hostname
+      # ansible_host: private_ip_address
+      # if you *must* set a string here (perhaps to identify the inventory source if you have multiple
+      # accounts you want to use as sources), you need to wrap this in two sets of quotes, either ' then "
+      # or " then '
+      some_inventory_wide_string: '"Yes, you need both types of quotes here"'
 
 Now the output of ``ansible-inventory -i demo.aws_ec2.yml --graph``:
 
@@ -99,6 +118,8 @@ Now the output of ``ansible-inventory -i demo.aws_ec2.yml --graph``:
       |--@development:
       |  |--ec2-12-345-678-901.compute-1.amazonaws.com
       |  |--ec2-98-765-432-10.compute-1.amazonaws.com
+      |--@role_Webserver
+      |  |--ec2-12-345-678-901.compute-1.amazonaws.com
       |--@tag_Name_ECS_Instance:
       |  |--ec2-98-765-432-10.compute-1.amazonaws.com
       |--@tag_Name_Test_Server:
@@ -113,7 +134,7 @@ Inventory plugins that support caching can use the general settings for the fact
 
     # demo.aws_ec2.yml
     plugin: amazon.aws.aws_ec2
-    cache: yes
+    cache: true
     cache_plugin: ansible.builtin.jsonfile
     cache_timeout: 7200
     cache_connection: /tmp/aws_inventory
@@ -134,7 +155,7 @@ Here is an example of setting inventory caching with some fact caching defaults 
 
 .. _inventory_plugin_list:
 
-Plugin List
+Plugin list
 -----------
 
 You can use ``ansible-doc -t inventory -l`` to see the list of available plugins.
@@ -145,18 +166,18 @@ Use ``ansible-doc -t inventory <plugin name>`` to see plugin-specific documentat
    :ref:`about_playbooks`
        An introduction to playbooks
    :ref:`callback_plugins`
-       Ansible callback plugins
+       Callback plugins
    :ref:`connection_plugins`
-       Ansible connection plugins
-   :ref:`playbooks_filters`
-       Jinja2 filter plugins
-   :ref:`playbooks_tests`
-       Jinja2 test plugins
-   :ref:`playbooks_lookups`
-       Jinja2 lookup plugins
+       Connection plugins
+   :ref:`filter_plugins`
+       Filter plugins
+   :ref:`test_plugins`
+       Test plugins
+   :ref:`lookup_plugins`
+       Lookup plugins
    :ref:`vars_plugins`
-       Ansible vars plugins
+       Vars plugins
    `User Mailing List <https://groups.google.com/group/ansible-devel>`_
        Have a question?  Stop by the google group!
-   `irc.freenode.net <http://irc.freenode.net>`_
-       #ansible IRC chat channel
+   :ref:`communication_irc`
+       How to join Ansible chat channels

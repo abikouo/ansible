@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright 2021 Red Hat
@@ -25,9 +24,65 @@ options:
         - A dictionary of the arguments that will be validated according to argument_spec
 author:
     - Ansible Core Team
+extends_documentation_fragment:
+    - action_common_attributes
+    - action_common_attributes.conn
+    - action_common_attributes.flow
+attributes:
+    action:
+        support: full
+    async:
+        support: none
+    become:
+        support: none
+    bypass_host_loop:
+        support: none
+    connection:
+        support: none
+    check_mode:
+        support: full
+    delegation:
+        support: none
+    diff_mode:
+        support: none
+    platform:
+        platforms: all
 '''
 
 EXAMPLES = r'''
+- name: verify vars needed for this task file are present when included
+  ansible.builtin.validate_argument_spec:
+        argument_spec: '{{required_data}}'
+  vars:
+    required_data:
+        # unlike spec file, just put the options in directly
+        stuff:
+            description: stuff
+            type: str
+            choices: ['who', 'knows', 'what']
+            default: what
+        but:
+            description: i guess we need one
+            type: str
+            required: true
+
+
+- name: verify vars needed for this task file are present when included, with spec from a spec file
+  ansible.builtin.validate_argument_spec:
+        argument_spec: "{{lookup('ansible.builtin.file', 'myargspec.yml')['specname']['options']}}"
+
+
+- name: verify vars needed for next include and not from inside it, also with params i'll only define there
+  block:
+    - ansible.builtin.validate_argument_spec:
+        argument_spec: "{{lookup('ansible.builtin.file', 'nakedoptions.yml'}}"
+        provided_arguments:
+            but: "that i can define on the include itself, like in it's C(vars:) keyword"
+
+    - name: the include itself
+      vars:
+        stuff: knows
+        but: nobuts!
 '''
 
 RETURN = r'''

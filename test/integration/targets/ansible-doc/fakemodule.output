@@ -2,15 +2,15 @@
 
         this is a fake module
 
+ADDED IN: version 1.0.0 of testns.testcol
+
 OPTIONS (= is mandatory):
 
 - _notreal
         really not a real option
-        [Default: (null)]
+        default: null
 
 
 AUTHOR: me
 
 SHORT_DESCIPTION: fake module
-
-VERSION_ADDED_COLLECTION: testns.testcol

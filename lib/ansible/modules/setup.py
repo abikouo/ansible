@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>
@@ -18,9 +17,19 @@ options:
         version_added: "2.1"
         description:
             - "If supplied, restrict the additional facts collected to the given subset.
-              Possible values: C(all), C(min), C(hardware), C(network), C(virtual), C(ohai), and
-              C(facter). Can specify a list of values to specify a larger subset.
-              Values can also be used with an initial C(!) to specify that
+              Possible values: C(all), C(all_ipv4_addresses), C(all_ipv6_addresses), C(apparmor), C(architecture),
+              C(caps), C(chroot),C(cmdline), C(date_time), C(default_ipv4), C(default_ipv6), C(devices),
+              C(distribution), C(distribution_major_version), C(distribution_release), C(distribution_version),
+              C(dns), C(effective_group_ids), C(effective_user_id), C(env), C(facter), C(fips), C(hardware),
+              C(interfaces), C(is_chroot), C(iscsi), C(kernel), C(local), C(lsb), C(machine), C(machine_id),
+              C(mounts), C(network), C(ohai), C(os_family), C(pkg_mgr), C(platform), C(processor), C(processor_cores),
+              C(processor_count), C(python), C(python_version), C(real_user_id), C(selinux), C(service_mgr),
+              C(ssh_host_key_dsa_public), C(ssh_host_key_ecdsa_public), C(ssh_host_key_ed25519_public),
+              C(ssh_host_key_rsa_public), C(ssh_host_pub_keys), C(ssh_pub_keys), C(system), C(system_capabilities),
+              C(system_capabilities_enforced), C(user), C(user_dir), C(user_gecos), C(user_gid), C(user_id),
+              C(user_shell), C(user_uid), C(virtual), C(virtualization_role), C(virtualization_type).
+             Can specify a list of values to specify a larger subset.
+             Values can also be used with an initial C(!) to specify that
               that specific subset should not be collected.  For instance:
               C(!hardware,!network,!virtual,!ohai,!facter). If C(!all) is specified
               then only the min subset is collected. To avoid collecting even the
@@ -73,6 +82,18 @@ description:
       available to a host. Ansible provides many I(facts) about the system,
       automatically.
     - This module is also supported for Windows targets.
+extends_documentation_fragment:
+  -  action_common_attributes
+  -  action_common_attributes.facts
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: none
+    facts:
+        support: full
+    platform:
+        platforms: posix, windows
 notes:
     - More ansible facts will be added with successive releases. If I(facter) or
       I(ohai) are installed, variables from these programs will also be snapshotted
@@ -84,15 +105,15 @@ notes:
     - The filter option filters only the first level subkey below ansible_facts.
     - If the target host is Windows, you will not currently have the ability to use
       C(filter) as this is provided by a simpler implementation of the module.
-    - This module is also supported for Windows targets.
     - This module should be run with elevated privileges on BSD systems to gather facts like ansible_product_version.
-    - Supports C(check_mode).
+    - For more information about delegated facts,
+      please check U(https://docs.ansible.com/ansible/latest/user_guide/playbooks_delegation.html#delegating-facts).
 author:
     - "Ansible Core Team"
     - "Michael DeHaan"
 '''
 
-EXAMPLES = """
+EXAMPLES = r"""
 # Display facts from all hosts and store them indexed by I(hostname) at C(/tmp/facts).
 # ansible all -m ansible.builtin.setup --tree /tmp/facts
 
@@ -103,16 +124,16 @@ EXAMPLES = """
 # ansible all -m ansible.builtin.setup -a 'filter=facter_*'
 
 # Collect only facts returned by facter.
-# ansible all -m ansible.builtin.setup -a 'gather_subset=!all,!any,facter'
+# ansible all -m ansible.builtin.setup -a 'gather_subset=!all,facter'
 
 - name: Collect only facts returned by facter
   ansible.builtin.setup:
     gather_subset:
       - '!all'
-      - '!any'
+      - '!<any valid subset>'
       - facter
 
-- name: Collect only selected facts
+- name: Filter and return only selected facts
   ansible.builtin.setup:
     filter:
       - 'ansible_distribution'
@@ -126,7 +147,7 @@ EXAMPLES = """
 # ansible all -m ansible.builtin.setup -a 'gather_subset=network,virtual'
 
 # Collect only network and virtual (excludes default minimum facts)
-# ansible all -m ansible.builtin.setup -a 'gather_subset=!all,!any,network,virtual'
+# ansible all -m ansible.builtin.setup -a 'gather_subset=!all,network,virtual'
 
 # Do not call puppet facter or ohai even if present.
 # ansible all -m ansible.builtin.setup -a 'gather_subset=!facter,!ohai'
@@ -137,8 +158,17 @@ EXAMPLES = """
 # Collect no facts, even the default minimum subset of facts:
 # ansible all -m ansible.builtin.setup -a 'gather_subset=!all,!min'
 
-# Display facts from Windows hosts with custom facts stored in C(C:\\custom_facts).
-# ansible windows -m ansible.builtin.setup -a "fact_path='c:\\custom_facts'"
+# Display facts from Windows hosts with custom facts stored in C:\custom_facts.
+# ansible windows -m ansible.builtin.setup -a "fact_path='c:\custom_facts'"
+
+# Gathers facts for the machines in the dbservers group (a.k.a Delegating facts)
+- hosts: app_servers
+  tasks:
+    - name: Gather facts from db servers
+      ansible.builtin.setup:
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+      loop: "{{ groups['dbservers'] }}"
 """
 
 # import module snippets

@@ -93,7 +93,7 @@ def test_run_no_extra_vars():
     assert exec_info.value.code == 2
 
 
-def test_ansible_version(capsys, mocker):
+def test_ansible_version(capsys):
     adhoc_cli = AdHocCLI(args=['/bin/ansible', '--version'])
     with pytest.raises(SystemExit):
         adhoc_cli.run()

@@ -1,6 +1,5 @@
 """Payload management for sending Ansible files and test content to other systems (VMs, containers)."""
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import atexit
 import os
@@ -8,8 +7,11 @@ import stat
 import tarfile
 import tempfile
 import time
+import typing as t
 
-from . import types as t
+from .constants import (
+    ANSIBLE_BIN_SYMLINK_MAP,
+)
 
 from .config import (
     IntegrationConfig,
@@ -32,27 +34,11 @@ from .util_common import (
 )
 
 # improve performance by disabling uid/gid lookups
-tarfile.pwd = None
-tarfile.grp = None
-
-# this bin symlink map must exactly match the contents of the bin directory
-# it is necessary for payload creation to reconstruct the bin directory when running ansible-test from an installed version of ansible
-ANSIBLE_BIN_SYMLINK_MAP = {
-    'ansible': '../lib/ansible/cli/scripts/ansible_cli_stub.py',
-    'ansible-config': 'ansible',
-    'ansible-connection': '../lib/ansible/cli/scripts/ansible_connection_cli_stub.py',
-    'ansible-console': 'ansible',
-    'ansible-doc': 'ansible',
-    'ansible-galaxy': 'ansible',
-    'ansible-inventory': 'ansible',
-    'ansible-playbook': 'ansible',
-    'ansible-pull': 'ansible',
-    'ansible-test': '../test/lib/ansible_test/_data/cli/ansible_test_cli_stub.py',
-    'ansible-vault': 'ansible',
-}
+tarfile.pwd = None  # type: ignore[attr-defined]  # undocumented attribute
+tarfile.grp = None  # type: ignore[attr-defined]  # undocumented attribute
 
 
-def create_payload(args, dst_path):  # type: (CommonConfig, str) -> None
+def create_payload(args: CommonConfig, dst_path: str) -> None:
     """Create a payload for delegation."""
     if args.explain:
         return
@@ -60,7 +46,7 @@ def create_payload(args, dst_path):  # type: (CommonConfig, str) -> None
     files = list(data_context().ansible_source)
     filters = {}
 
-    def make_executable(tar_info):  # type: (tarfile.TarInfo) -> t.Optional[tarfile.TarInfo]
+    def make_executable(tar_info: tarfile.TarInfo) -> t.Optional[tarfile.TarInfo]:
         """Make the given file executable."""
         tar_info.mode |= stat.S_IXUSR | stat.S_IXOTH | stat.S_IXGRP
         return tar_info
@@ -83,8 +69,8 @@ def create_payload(args, dst_path):  # type: (CommonConfig, str) -> None
 
         collection_layouts = data_context().create_collection_layouts()
 
-        content_files = []
-        extra_files = []
+        content_files: list[tuple[str, str]] = []
+        extra_files: list[tuple[str, str]] = []
 
         for layout in collection_layouts:
             if layout == data_context().content:
@@ -131,7 +117,7 @@ def create_payload(args, dst_path):  # type: (CommonConfig, str) -> None
     display.info('Created a %d byte payload archive containing %d files in %d seconds.' % (payload_size_bytes, len(files), duration), verbosity=1)
 
 
-def create_temporary_bin_files(args):  # type: (CommonConfig) -> t.Tuple[t.Tuple[str, str], ...]
+def create_temporary_bin_files(args: CommonConfig) -> tuple[tuple[str, str], ...]:
     """Create a temporary ansible bin directory populated using the symlink map."""
     if args.explain:
         temp_path = '/tmp/ansible-tmp-bin'

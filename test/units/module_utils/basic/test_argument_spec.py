@@ -15,6 +15,7 @@ import pytest
 from units.compat.mock import MagicMock
 from ansible.module_utils import basic
 from ansible.module_utils.api import basic_auth_argument_spec, rate_limit_argument_spec, retry_argument_spec
+from ansible.module_utils.common import warnings
 from ansible.module_utils.common.warnings import get_deprecation_messages, get_warning_messages
 from ansible.module_utils.six import integer_types, string_types
 from ansible.module_utils.six.moves import builtins
@@ -400,8 +401,10 @@ class TestComplexArgSpecs:
         assert am.params['bar3'][1] == 'test/'
 
     @pytest.mark.parametrize('stdin', [{'foo': 'hello', 'zodraz': 'one'}], indirect=['stdin'])
-    def test_deprecated_alias(self, capfd, mocker, stdin, complex_argspec):
+    def test_deprecated_alias(self, capfd, mocker, stdin, complex_argspec, monkeypatch):
         """Test a deprecated alias"""
+        monkeypatch.setattr(warnings, '_global_deprecations', [])
+
         am = basic.AnsibleModule(**complex_argspec)
 
         assert "Alias 'zodraz' is deprecated." in get_deprecation_messages()[0]['msg']
@@ -706,3 +709,16 @@ def test_no_log_none(stdin, capfd):
     # makes it into am.no_log_values. Instead we can check for the warning
     # emitted by am._log_invocation.
     assert len(get_warning_messages()) > 0
+
+
+@pytest.mark.parametrize("stdin", [{"pass": "testing"}], indirect=["stdin"])
+def test_no_log_alias(stdin, capfd):
+    """Given module parameters that use an alias for a parameter that matches
+    PASSWORD_MATCH and has no_log=True set, a warning should not be issued.
+    """
+    arg_spec = {
+        "other_pass": {"no_log": True, "aliases": ["pass"]},
+    }
+    am = basic.AnsibleModule(arg_spec)
+
+    assert len(get_warning_messages()) == 0

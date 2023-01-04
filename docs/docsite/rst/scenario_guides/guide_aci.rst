@@ -111,14 +111,14 @@ For this very reason, the modules need to run on the local Ansible controller (o
 
 Gathering facts
 ```````````````
-Because we run the modules on the Ansible controller gathering facts will not work. That is why when using these ACI modules it is mandatory to disable facts gathering. You can do this globally in your ``ansible.cfg`` or by adding ``gather_facts: no`` to every play.
+Because we run the modules on the Ansible controller gathering facts will not work. That is why when using these ACI modules it is mandatory to disable facts gathering. You can do this globally in your ``ansible.cfg`` or by adding ``gather_facts: false`` to every play.
 
 .. code-block:: yaml
    :emphasize-lines: 3
 
     - name: Another play in my playbook
       hosts: my-apic-1
-      gather_facts: no
+      gather_facts: false
       tasks:
       - name: Create a tenant
         aci_tenant:
@@ -235,7 +235,7 @@ By default, if an environment variable ``<protocol>_proxy`` is set on the target
 
 HTTP redirects can redirect from HTTP to HTTPS so ensure that the proxy environment for both protocols is correctly configured.
 
-If proxy support is not needed, but the system may have it configured nevertheless, use the parameter ``use_proxy: no`` to avoid accidental system proxy usage.
+If proxy support is not needed, but the system may have it configured nevertheless, use the parameter ``use_proxy: false`` to avoid accidental system proxy usage.
 
 .. hint:: Selective proxy support using the ``no_proxy`` environment variable is also supported.
 
@@ -599,7 +599,7 @@ The following error messages may occur and this section can help you understand 
 
 
     APIC Error 801: property descr of uni/tn-TENANT/ap-AP failed validation for value 'A "legacy" network'
-        Some values in the APIC have strict format-rules to comply to, and the internal APIC validation check for the provided value failed. In the above case, the ``description`` parameter (internally known as ``descr``) only accepts values conforming to `Regex: [a-zA-Z0-9\\!#$%()*,-./:;@ _{|}~?&+]+ <https://pubhub-prod.s3.amazonaws.com/media/apic-mim-ref/docs/MO-fvAp.html#descr>`_, in general it must not include quotes or square brackets.
+        Some values in the APIC have strict format-rules to comply to, and the internal APIC validation check for the provided value failed. In the above case, the ``description`` parameter (internally known as ``descr``) only accepts values conforming to Regex: ``[a-zA-Z0-9\\!#$%()*,-./:;@ _{|}~?&+]+``, in general it must not include quotes or square brackets.
 
 
 .. _aci_guide_known_issues:
@@ -640,7 +640,7 @@ ACI Ansible community
 ---------------------
 If you have specific issues with the ACI modules, or a feature request, or you like to contribute to the ACI project by proposing changes or documentation updates, look at the Ansible Community wiki ACI page at: https://github.com/ansible/community/wiki/Network:-ACI
 
-You will find our roadmap, an overview of open ACI issues and pull-requests, and more information about who we are. If you have an interest in using ACI with Ansible, feel free to join! We occasionally meet online to track progress and prepare for new Ansible releases.
+You will find our roadmap, an overview of open ACI issues and pull-requests, and more information about who we are. If you have an interest in using ACI with Ansible, feel free to join! We occasionally meet online (on the #ansible-network chat channel, using Matrix at ansible.im or using IRC at `irc.libera.chat <https://libera.chat/>`_) to track progress and prepare for new Ansible releases.
 
 
 .. seealso::
@@ -653,9 +653,7 @@ You will find our roadmap, an overview of open ACI issues and pull-requests, and
        The Ansible ACI community wiki page, includes roadmap, ideas and development documentation.
    :ref:`network_guide`
        A detailed guide on how to use Ansible for automating network infrastructure.
-   `Network Working Group <https://github.com/ansible/community/tree/master/group-network>`_
+   `Network Working Group <https://github.com/ansible/community/tree/main/group-network>`_
        The Ansible Network community page, includes contact information and meeting information.
-   `#ansible-network <https://webchat.freenode.net/?channels=ansible-network>`_
-       The #ansible-network IRC chat channel on Freenode.net.
    `User Mailing List <https://groups.google.com/group/ansible-project>`_
        Have a question?  Stop by the google group!

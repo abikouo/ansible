@@ -45,7 +45,7 @@ Downloading a collection from Automation Hub
 
 You can download collections from Automation Hub at the command line. Automation Hub content is available to subscribers only, so you must download an API token and configure your local environment to provide it before you can you download collections. To download a collection from Automation Hub with the ``ansible-galaxy`` command:
 
-1. Get your Automation Hub API token. Go to https://cloud.redhat.com/ansible/automation-hub/token/ and click :guilabel:`Get API token` from the version dropdown to copy your API token.
+1. Get your Automation Hub API token. Go to https://cloud.redhat.com/ansible/automation-hub/token/ and click :guilabel:`Load token` from the version dropdown to copy your API token.
 2. Configure Red Hat Automation Hub server in the ``server_list``  option under the ``[galaxy]`` section in your :file:`ansible.cfg` file.
 
   .. code-block:: ini
@@ -54,7 +54,7 @@ You can download collections from Automation Hub at the command line. Automation
       server_list = automation_hub
 
       [galaxy_server.automation_hub]
-      url=https://cloud.redhat.com/api/automation-hub/
+      url=https://console.redhat.com/api/automation-hub/
       auth_url=https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token
       token=my_ah_token
 
@@ -82,6 +82,11 @@ Downloading a collection for offline use
 -----------------------------------------
 
 .. include:: ../shared_snippets/download_tarball_collections.txt
+
+Installing a collection from source files
+-----------------------------------------
+
+.. include:: ../shared_snippets/installing_collections_file.rst
 
 Installing a collection from a git repository
 ---------------------------------------------
@@ -348,7 +353,7 @@ Below are the contents of the :file:`webserver.yml` file:
     - src: https://github.com/bennojoy/nginx
 
     # from Bitbucket
-    - src: git+http://bitbucket.org/willthames/git-ansible-galaxy
+    - src: git+https://bitbucket.org/willthames/git-ansible-galaxy
       version: v1.4
 
 The following shows the contents of the :file:`requirements.yml` file that now includes the :file:`webserver.yml` file:
@@ -487,3 +492,6 @@ Use ``remove`` to delete a role from *roles_path*:
     Shareable collections of modules, playbooks and roles
   :ref:`playbooks_reuse_roles`
     Reusable tasks, handlers, and other files in a known directory structure
+  :ref:`command_line_tools`
+    Perform other related operations
+

@@ -21,16 +21,26 @@ Playbook
 
 This section discusses any changes you may need to make to your playbooks.
 
+* Syntax in 1.9.x
+
 .. code-block:: yaml
 
-    # Syntax in 1.9.x
     - debug:
         msg: "{{ 'test1_junk 1\\\\3' | regex_replace('(.*)_junk (.*)', '\\\\1 \\\\2') }}"
-    # Syntax in 2.0.x
+
+
+* Syntax in 2.0.x
+
+.. code-block:: yaml
+
     - debug:
         msg: "{{ 'test1_junk 1\\3' | regex_replace('(.*)_junk (.*)', '\\1 \\2') }}"
 
-    # Output:
+
+* Output:
+
+.. code-block:: yaml
+
     "msg": "test1 1\\3"
 
 To make an escaped string that will work on all versions you have two options::
@@ -42,13 +52,17 @@ uses key=value escaping which has not changed.  The other option is to check for
 "{{ (ansible_version|version_compare('2.0', 'ge'))|ternary( 'test1_junk 1\\3' | regex_replace('(.*)_junk (.*)', '\\1 \\2') , 'test1_junk 1\\\\3' | regex_replace('(.*)_junk (.*)', '\\\\1 \\\\2') ) }}"
 
 * trailing newline When a string with a trailing newline was specified in the
-  playbook via yaml dict format, the trailing newline was stripped. When
+  playbook through yaml dict format, the trailing newline was stripped. When
   specified in key=value format, the trailing newlines were kept. In v2, both
   methods of specifying the string will keep the trailing newlines. If you
   relied on the trailing newline being stripped, you can change your playbook
   using the following as an example::
 
-    # Syntax in 1.9.x
+
+  * Syntax in 1.9.x
+
+  .. code-block:: yaml
+
     vars:
       message: >
         Testing
@@ -57,15 +71,24 @@ uses key=value escaping which has not changed.  The other option is to check for
     - debug:
         msg: "{{ message }}"
 
-    # Syntax in 2.0.x
+
+  * Syntax in 2.0.x
+
+  .. code-block:: yaml
+
     vars:
       old_message: >
         Testing
         some things
-      message: "{{ old_messsage[:-1] }}"
+      message: "{{ old_message[:-1] }}"
     - debug:
         msg: "{{ message }}"
-    # Output
+
+
+  * Output
+  
+  .. code-block:: yaml
+
     "msg": "Testing some things"
 
 * Behavior of templating DOS-type text files changes with Ansible v2.
@@ -75,7 +98,9 @@ uses key=value escaping which has not changed.  The other option is to check for
 * When specifying complex args as a variable, the variable must use the full jinja2
   variable syntax (```{{var_name}}```) - bare variable names there are no longer accepted.
   In fact, even specifying args with variables has been deprecated, and will not be
-  allowed in future versions::
+  allowed in future versions:
+
+.. code-block:: yaml
 
     ---
     - hosts: localhost
@@ -87,12 +112,12 @@ uses key=value escaping which has not changed.  The other option is to check for
           - { path: /tmp/3b, state: directory, mode: 0700 }
       tasks:
         - file:
-          args: "{{item}}" # <- args here uses the full variable syntax
+          args: "{{item}}"
           with_items: "{{my_dirs}}"
 
 * porting task includes
 * More dynamic. Corner-case formats that were not supposed to work now do not, as expected.
-* variables defined in the yaml dict format https://github.com/ansible/ansible/issues/13324
+* variables defined in the yaml dict format see `issue 13324 <https://github.com/ansible/ansible/issues/13324>`_
 * templating (variables in playbooks and template lookups) has improved with regard to keeping the original instead of turning everything into a string.
   If you need the old behavior, quote the value to pass it around as a string.
 * Empty variables and variables set to null in yaml are no longer converted to empty strings. They will retain the value of `None`.
@@ -111,7 +136,9 @@ While all items listed here will show a deprecation warning message, they still 
 * Bare variables in ``with_`` loops should instead use the ``"{{ var }}"`` syntax, which helps eliminate ambiguity.
 * The ansible-galaxy text format requirements file. Users should use the YAML format for requirements instead.
 * Undefined variables within a ``with_`` loop's list currently do not interrupt the loop, but they do issue a warning; in the future, they will issue an error.
-* Using dictionary variables to set all task parameters is unsafe and will be removed in a future version. For example::
+* Using dictionary variables to set all task parameters is unsafe and will be removed in a future version. Example of a deprecated variant:
+
+.. code-block:: yaml
 
     - hosts: localhost
       gather_facts: no
@@ -119,14 +146,22 @@ While all items listed here will show a deprecation warning message, they still 
         debug_params:
           msg: "hello there"
       tasks:
-        # These are both deprecated:
         - debug: "{{debug_params}}"
         - debug:
           args: "{{debug_params}}"
 
-        # Use this instead:
+Example of a recommended variant:
+
+.. code-block:: yaml
+
+    - hosts: localhost
+      gather_facts: no
+      vars:
+        debug_params:
+          msg: "hello there"
+      tasks:
         - debug:
-            msg: "{{debug_params['msg']}}"
+          msg: "{{debug_params['msg']}}"
 
 * Host patterns should use a comma (,) or colon (:) instead of a semicolon (;) to separate hosts/groups in the pattern.
 * Ranges specified in host patterns should use the [x:y] syntax, instead of [x-y].
@@ -149,7 +184,7 @@ Should now be::
         a: 1
 
 * Setting any_errors_fatal on a task is no longer supported. This should be set at the play level only.
-* Bare variables in the `environment` dictionary (for plays/tasks/etc.) are no longer supported. Variables specified there should use the full variable syntax: '{{foo}}'.
+* Bare variables in the `environment` dictionary (for plays/tasks/and so on) are no longer supported. Variables specified there should use the full variable syntax: '{{foo}}'.
 * Tags (or any directive) should no longer be specified with other parameters in a task include. Instead, they should be specified as an option on the task.
   For example::
 

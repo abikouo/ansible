@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>, and others
@@ -22,10 +21,24 @@ description:
        like C("*"), C("<"), C(">"), C("|"), C(";") and C("&") will not work.
        Use the M(ansible.builtin.shell) module if you need these features.
      - To create C(command) tasks that are easier to read than the ones using space-delimited
-       arguments, pass parameters using the C(args) L(task keyword,../reference_appendices/playbooks_keywords.html#task)
+       arguments, pass parameters using the C(args) L(task keyword,https://docs.ansible.com/ansible/latest/reference_appendices/playbooks_keywords.html#task)
        or use C(cmd) parameter.
      - Either a free form command or C(cmd) parameter is required, see the examples.
      - For Windows targets, use the M(ansible.windows.win_command) module instead.
+extends_documentation_fragment:
+    - action_common_attributes
+    - action_common_attributes.raw
+attributes:
+    check_mode:
+        details: while the command itself is arbitrary and cannot be subject to the check mode semantics it adds C(creates)/C(removes) options as a workaround
+        support: partial
+    diff_mode:
+        support: none
+    platform:
+      support: full
+      platforms: posix
+    raw:
+      support: full
 options:
   free_form:
     description:
@@ -47,24 +60,18 @@ options:
     type: path
     description:
       - A filename or (since 2.0) glob pattern. If a matching file already exists, this step B(will not) be run.
+      - This is checked before I(removes) is checked.
   removes:
     type: path
     description:
       - A filename or (since 2.0) glob pattern. If a matching file exists, this step B(will) be run.
+      - This is checked after I(creates) is checked.
     version_added: "0.8"
   chdir:
     type: path
     description:
       - Change into this directory before running the command.
     version_added: "0.6"
-  warn:
-    description:
-      - (deprecated) Enable or disable task warnings.
-      - This feature is deprecated and will be removed in 2.14.
-      - As of version 2.11, this option is now disabled by default.
-    type: bool
-    default: no
-    version_added: "1.8"
   stdin:
     description:
       - Set the stdin of the command directly to the specified value.
@@ -74,7 +81,7 @@ options:
     type: bool
     default: yes
     description:
-      - If set to C(yes), append a newline to stdin data.
+      - If set to C(true), append a newline to stdin data.
     version_added: "2.8"
   strip_empty_ends:
     description:
@@ -214,46 +221,11 @@ from ansible.module_utils._text import to_native, to_bytes, to_text
 from ansible.module_utils.common.collections import is_iterable
 
 
-def check_command(module, commandline):
-    arguments = {'chown': 'owner', 'chmod': 'mode', 'chgrp': 'group',
-                 'ln': 'state=link', 'mkdir': 'state=directory',
-                 'rmdir': 'state=absent', 'rm': 'state=absent', 'touch': 'state=touch'}
-    commands = {'curl': 'get_url or uri', 'wget': 'get_url or uri',
-                'svn': 'subversion', 'service': 'service',
-                'mount': 'mount', 'rpm': 'yum, dnf or zypper', 'yum': 'yum', 'apt-get': 'apt',
-                'tar': 'unarchive', 'unzip': 'unarchive', 'sed': 'replace, lineinfile or template',
-                'dnf': 'dnf', 'zypper': 'zypper'}
-    become = ['sudo', 'su', 'pbrun', 'pfexec', 'runas', 'pmrun', 'machinectl']
-    if isinstance(commandline, list):
-        command = commandline[0]
-    else:
-        command = commandline.split()[0]
-    command = os.path.basename(command)
-
-    disable_suffix = "If you need to use command because {mod} is insufficient you can add" \
-                     " 'warn: false' to this command task or set 'command_warnings=False' in" \
-                     " ansible.cfg to get rid of this message."
-    substitutions = {'mod': None, 'cmd': command}
-
-    if command in arguments:
-        msg = "Consider using the {mod} module with {subcmd} rather than running '{cmd}'.  " + disable_suffix
-        substitutions['mod'] = 'file'
-        substitutions['subcmd'] = arguments[command]
-        module.warn(msg.format(**substitutions))
-
-    if command in commands:
-        msg = "Consider using the {mod} module rather than running '{cmd}'.  " + disable_suffix
-        substitutions['mod'] = commands[command]
-        module.warn(msg.format(**substitutions))
-
-    if command in become:
-        module.warn("Consider using 'become', 'become_method', and 'become_user' rather than running %s" % (command,))
-
-
 def main():
 
     # the command module is the one ansible module that does not take key=value args
     # hence don't copy this one if you are looking to build others!
+    # NOTE: ensure splitter.py is kept in sync for exceptions
     module = AnsibleModule(
         argument_spec=dict(
             _raw_params=dict(),
@@ -264,7 +236,6 @@ def main():
             creates=dict(type='path'),
             removes=dict(type='path'),
             # The default for this really comes from the action plugin
-            warn=dict(type='bool', default=False, removed_in_version='2.14', removed_from_collection='ansible.builtin'),
             stdin=dict(required=False),
             stdin_add_newline=dict(type='bool', default=True),
             strip_empty_ends=dict(type='bool', default=True),
@@ -278,100 +249,103 @@ def main():
     argv = module.params['argv']
     creates = module.params['creates']
     removes = module.params['removes']
-    warn = module.params['warn']
     stdin = module.params['stdin']
     stdin_add_newline = module.params['stdin_add_newline']
     strip = module.params['strip_empty_ends']
+
+    # we promissed these in 'always' ( _lines get autoaded on action plugin)
+    r = {'changed': False, 'stdout': '', 'stderr': '', 'rc': None, 'cmd': None, 'start': None, 'end': None, 'delta': None, 'msg': ''}
 
     if not shell and executable:
         module.warn("As of Ansible 2.4, the parameter 'executable' is no longer supported with the 'command' module. Not using '%s'." % executable)
         executable = None
 
     if (not args or args.strip() == '') and not argv:
-        module.fail_json(rc=256, msg="no command given")
+        r['rc'] = 256
+        r['msg'] = "no command given"
+        module.fail_json(**r)
 
     if args and argv:
-        module.fail_json(rc=256, msg="only command or argv can be given, not both")
+        r['rc'] = 256
+        r['msg'] = "only command or argv can be given, not both"
+        module.fail_json(**r)
 
     if not shell and args:
         args = shlex.split(args)
 
     args = args or argv
-
     # All args must be strings
     if is_iterable(args, include_strings=False):
         args = [to_native(arg, errors='surrogate_or_strict', nonstring='simplerepr') for arg in args]
 
+    r['cmd'] = args
+
     if chdir:
-        try:
-            chdir = to_bytes(os.path.abspath(chdir), errors='surrogate_or_strict')
-        except ValueError as e:
-            module.fail_json(msg='Unable to use supplied chdir: %s' % to_text(e))
+        chdir = to_bytes(chdir, errors='surrogate_or_strict')
 
         try:
             os.chdir(chdir)
         except (IOError, OSError) as e:
-            module.fail_json(msg='Unable to change directory before execution: %s' % to_text(e))
+            r['msg'] = 'Unable to change directory before execution: %s' % to_text(e)
+            module.fail_json(**r)
 
-    if creates:
-        # do not run the command if the line contains creates=filename
-        # and the filename already exists.  This allows idempotence
-        # of command executions.
-        if glob.glob(creates):
-            module.exit_json(
-                cmd=args,
-                stdout="skipped, since %s exists" % creates,
-                changed=False,
-                rc=0
-            )
-
-    if removes:
-        # do not run the command if the line contains removes=filename
-        # and the filename does not exist.  This allows idempotence
-        # of command executions.
-        if not glob.glob(removes):
-            module.exit_json(
-                cmd=args,
-                stdout="skipped, since %s does not exist" % removes,
-                changed=False,
-                rc=0
-            )
-
-    if warn:
-        check_command(module, args)
-
-    startd = datetime.datetime.now()
-
-    if not module.check_mode:
-        rc, out, err = module.run_command(args, executable=executable, use_unsafe_shell=shell, encoding=None, data=stdin, binary_data=(not stdin_add_newline))
-    elif creates or removes:
-        rc = 0
-        out = err = b'Command would have run if not in check mode'
+    # check_mode partial support, since it only really works in checking creates/removes
+    if module.check_mode:
+        shoulda = "Would"
     else:
-        module.exit_json(msg="skipped, running in check mode", skipped=True)
+        shoulda = "Did"
 
-    endd = datetime.datetime.now()
-    delta = endd - startd
+    # special skips for idempotence if file exists (assumes command creates)
+    if creates:
+        if glob.glob(creates):
+            r['msg'] = "%s not run command since '%s' exists" % (shoulda, creates)
+            r['stdout'] = "skipped, since %s exists" % creates  # TODO: deprecate
+
+            r['rc'] = 0
+
+    # special skips for idempotence if file does not exist (assumes command removes)
+    if not r['msg'] and removes:
+        if not glob.glob(removes):
+            r['msg'] = "%s not run command since '%s' does not exist" % (shoulda, removes)
+            r['stdout'] = "skipped, since %s does not exist" % removes  # TODO: deprecate
+            r['rc'] = 0
+
+    if r['msg']:
+        module.exit_json(**r)
+
+    r['changed'] = True
+
+    # actually executes command (or not ...)
+    if not module.check_mode:
+        r['start'] = datetime.datetime.now()
+        r['rc'], r['stdout'], r['stderr'] = module.run_command(args, executable=executable, use_unsafe_shell=shell, encoding=None,
+                                                               data=stdin, binary_data=(not stdin_add_newline))
+        r['end'] = datetime.datetime.now()
+    else:
+        # this is partial check_mode support, since we end up skipping if we get here
+        r['rc'] = 0
+        r['msg'] = "Command would have run if not in check mode"
+        if creates is None and removes is None:
+            r['skipped'] = True
+            # skipped=True and changed=True are mutually exclusive
+            r['changed'] = False
+
+    # convert to text for jsonization and usability
+    if r['start'] is not None and r['end'] is not None:
+        # these are datetime objects, but need them as strings to pass back
+        r['delta'] = to_text(r['end'] - r['start'])
+        r['end'] = to_text(r['end'])
+        r['start'] = to_text(r['start'])
 
     if strip:
-        out = out.rstrip(b"\r\n")
-        err = err.rstrip(b"\r\n")
+        r['stdout'] = to_text(r['stdout']).rstrip("\r\n")
+        r['stderr'] = to_text(r['stderr']).rstrip("\r\n")
 
-    result = dict(
-        cmd=args,
-        stdout=out,
-        stderr=err,
-        rc=rc,
-        start=str(startd),
-        end=str(endd),
-        delta=str(delta),
-        changed=True,
-    )
+    if r['rc'] != 0:
+        r['msg'] = 'non-zero return code'
+        module.fail_json(**r)
 
-    if rc != 0:
-        module.fail_json(msg='non-zero return code', **result)
-
-    module.exit_json(**result)
+    module.exit_json(**r)
 
 
 if __name__ == '__main__':

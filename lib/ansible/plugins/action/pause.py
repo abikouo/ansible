@@ -32,7 +32,6 @@ from os import (
 from ansible.errors import AnsibleError
 from ansible.module_utils._text import to_text, to_native
 from ansible.module_utils.parsing.convert_bool import boolean
-from ansible.module_utils.six import PY3
 from ansible.plugins.action import ActionBase
 from ansible.utils.display import Display
 
@@ -51,12 +50,33 @@ try:
 except ImportError:
     HAS_CURSES = False
 
+MOVE_TO_BOL = b'\r'
+CLEAR_TO_EOL = b'\x1b[K'
 if HAS_CURSES:
-    MOVE_TO_BOL = curses.tigetstr('cr')
-    CLEAR_TO_EOL = curses.tigetstr('el')
-else:
-    MOVE_TO_BOL = b'\r'
-    CLEAR_TO_EOL = b'\x1b[K'
+    # curses.tigetstr() returns None in some circumstances
+    MOVE_TO_BOL = curses.tigetstr('cr') or MOVE_TO_BOL
+    CLEAR_TO_EOL = curses.tigetstr('el') or CLEAR_TO_EOL
+
+
+def setraw(fd, when=termios.TCSAFLUSH):
+    """Put terminal into a raw mode.
+
+    Copied from ``tty`` from CPython 3.11.0, and modified to not remove OPOST from OFLAG
+
+    OPOST is kept to prevent an issue with multi line prompts from being corrupted now that display
+    is proxied via the queue from forks. The problem is a race condition, in that we proxy the display
+    over the fork, but before it can be displayed, this plugin will have continued executing, potentially
+    setting stdout and stdin to raw which remove output post processing that commonly converts NL to CRLF
+    """
+    mode = termios.tcgetattr(fd)
+    mode[tty.IFLAG] = mode[tty.IFLAG] & ~(termios.BRKINT | termios.ICRNL | termios.INPCK | termios.ISTRIP | termios.IXON)
+    # mode[tty.OFLAG] = mode[tty.OFLAG] & ~(termios.OPOST)
+    mode[tty.CFLAG] = mode[tty.CFLAG] & ~(termios.CSIZE | termios.PARENB)
+    mode[tty.CFLAG] = mode[tty.CFLAG] | termios.CS8
+    mode[tty.LFLAG] = mode[tty.LFLAG] & ~(termios.ECHO | termios.ICANON | termios.IEXTEN | termios.ISIG)
+    mode[tty.CC][termios.VMIN] = 1
+    mode[tty.CC][termios.VTIME] = 0
+    termios.tcsetattr(fd, when, mode)
 
 
 class AnsibleTimeoutExceeded(Exception):
@@ -89,7 +109,6 @@ class ActionModule(ActionBase):
     ''' pauses execution for a length or time, or until input is received '''
 
     BYPASS_HOST_LOOP = True
-    _VALID_ARGS = frozenset(('echo', 'minutes', 'prompt', 'seconds'))
 
     def run(self, tmp=None, task_vars=None):
         ''' run the pause action module '''
@@ -99,10 +118,22 @@ class ActionModule(ActionBase):
         result = super(ActionModule, self).run(tmp, task_vars)
         del tmp  # tmp no longer has any effect
 
+        validation_result, new_module_args = self.validate_argument_spec(
+            argument_spec={
+                'echo': {'type': 'bool', 'default': True},
+                'minutes': {'type': int},  # Don't break backwards compat, allow floats, by using int callable
+                'seconds': {'type': int},  # Don't break backwards compat, allow floats, by using int callable
+                'prompt': {'type': 'str'},
+            },
+            mutually_exclusive=(
+                ('minutes', 'seconds'),
+            ),
+        )
+
         duration_unit = 'minutes'
         prompt = None
         seconds = None
-        echo = True
+        echo = new_module_args['echo']
         echo_prompt = ''
         result.update(dict(
             changed=False,
@@ -115,41 +146,21 @@ class ActionModule(ActionBase):
             echo=echo
         ))
 
-        # Should keystrokes be echoed to stdout?
-        if 'echo' in self._task.args:
-            try:
-                echo = boolean(self._task.args['echo'])
-            except TypeError as e:
-                result['failed'] = True
-                result['msg'] = to_native(e)
-                return result
+        # Add a note saying the output is hidden if echo is disabled
+        if not echo:
+            echo_prompt = ' (output is hidden)'
 
-            # Add a note saying the output is hidden if echo is disabled
-            if not echo:
-                echo_prompt = ' (output is hidden)'
-
-        # Is 'prompt' a key in 'args'?
-        if 'prompt' in self._task.args:
-            prompt = "[%s]\n%s%s:" % (self._task.get_name().strip(), self._task.args['prompt'], echo_prompt)
+        if new_module_args['prompt']:
+            prompt = "[%s]\n%s%s:" % (self._task.get_name().strip(), new_module_args['prompt'], echo_prompt)
         else:
             # If no custom prompt is specified, set a default prompt
             prompt = "[%s]\n%s%s:" % (self._task.get_name().strip(), 'Press enter to continue, Ctrl+C to interrupt', echo_prompt)
 
-        # Are 'minutes' or 'seconds' keys that exist in 'args'?
-        if 'minutes' in self._task.args or 'seconds' in self._task.args:
-            try:
-                if 'minutes' in self._task.args:
-                    # The time() command operates in seconds so we need to
-                    # recalculate for minutes=X values.
-                    seconds = int(self._task.args['minutes']) * 60
-                else:
-                    seconds = int(self._task.args['seconds'])
-                    duration_unit = 'seconds'
-
-            except ValueError as e:
-                result['failed'] = True
-                result['msg'] = u"non-integer value given for prompt duration:\n%s" % to_text(e)
-                return result
+        if new_module_args['minutes'] is not None:
+            seconds = new_module_args['minutes'] * 60
+        elif new_module_args['seconds'] is not None:
+            seconds = new_module_args['seconds']
+            duration_unit = 'seconds'
 
         ########################################################################
         # Begin the hard work!
@@ -174,7 +185,7 @@ class ActionModule(ActionBase):
                 display.display("(ctrl+C then 'C' = continue early, ctrl+C then 'A' = abort)\r"),
 
                 # show the prompt specified in the task
-                if 'prompt' in self._task.args:
+                if new_module_args['prompt']:
                     display.display(prompt)
 
             else:
@@ -185,12 +196,8 @@ class ActionModule(ActionBase):
             stdin_fd = None
             stdout_fd = None
             try:
-                if PY3:
-                    stdin = self._connection._new_stdin.buffer
-                    stdout = sys.stdout.buffer
-                else:
-                    stdin = self._connection._new_stdin
-                    stdout = sys.stdout
+                stdin = self._connection._new_stdin.buffer
+                stdout = sys.stdout.buffer
                 stdin_fd = stdin.fileno()
                 stdout_fd = stdout.fileno()
             except (ValueError, AttributeError):
@@ -213,12 +220,12 @@ class ActionModule(ActionBase):
                     backspace = [b'\x7f', b'\x08']
 
                 old_settings = termios.tcgetattr(stdin_fd)
-                tty.setraw(stdin_fd)
+                setraw(stdin_fd)
 
                 # Only set stdout to raw mode if it is a TTY. This is needed when redirecting
                 # stdout to a file since a file cannot be set to raw mode.
                 if isatty(stdout_fd):
-                    tty.setraw(stdout_fd)
+                    setraw(stdout_fd)
 
                 # Only echo input if no timeout is specified
                 if not seconds and echo:
@@ -279,7 +286,7 @@ class ActionModule(ActionBase):
         finally:
             # cleanup and save some information
             # restore the old settings for the duped stdin stdin_fd
-            if not(None in (stdin_fd, old_settings)) and isatty(stdin_fd):
+            if not (None in (stdin_fd, old_settings)) and isatty(stdin_fd):
                 termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_settings)
 
             duration = time.time() - start

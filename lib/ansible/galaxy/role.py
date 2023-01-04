@@ -27,14 +27,17 @@ import datetime
 import os
 import tarfile
 import tempfile
-import yaml
-from distutils.version import LooseVersion
+
+from collections.abc import MutableSequence
 from shutil import rmtree
 
 from ansible import context
-from ansible.errors import AnsibleError
+from ansible.errors import AnsibleError, AnsibleParserError
+from ansible.galaxy.api import GalaxyAPI
 from ansible.galaxy.user_agent import user_agent
 from ansible.module_utils._text import to_native, to_text
+from ansible.module_utils.common.yaml import yaml_dump, yaml_load
+from ansible.module_utils.compat.version import LooseVersion
 from ansible.module_utils.urls import open_url
 from ansible.playbook.role.requirement import RoleRequirement
 from ansible.utils.display import Display
@@ -53,6 +56,7 @@ class GalaxyRole(object):
     def __init__(self, galaxy, api, name, src=None, version=None, scm=None, path=None):
 
         self._metadata = None
+        self._metadata_dependencies = None
         self._requirements = None
         self._install_info = None
         self._validate_certs = not context.CLIARGS['ignore_certs']
@@ -60,11 +64,12 @@ class GalaxyRole(object):
         display.debug('Validate TLS certificates: %s' % self._validate_certs)
 
         self.galaxy = galaxy
-        self.api = api
+        self._api = api
 
         self.name = name
         self.version = version
         self.src = src or name
+        self.download_url = None
         self.scm = scm
         self.paths = [os.path.join(x, self.name) for x in galaxy.roles_paths]
 
@@ -84,7 +89,7 @@ class GalaxyRole(object):
             self.path = path
         else:
             # use the first path by default
-            self.path = os.path.join(galaxy.roles_paths[0], self.name)
+            self.path = self.paths[0]
 
     def __repr__(self):
         """
@@ -100,6 +105,12 @@ class GalaxyRole(object):
         return self.name == other.name
 
     @property
+    def api(self):
+        if not isinstance(self._api, GalaxyAPI):
+            return self._api.api
+        return self._api
+
+    @property
     def metadata(self):
         """
         Returns role metadata
@@ -111,13 +122,31 @@ class GalaxyRole(object):
                     if os.path.isfile(meta_path):
                         try:
                             with open(meta_path, 'r') as f:
-                                self._metadata = yaml.safe_load(f)
+                                self._metadata = yaml_load(f)
                         except Exception:
                             display.vvvvv("Unable to load metadata for %s" % self.name)
                             return False
                         break
 
         return self._metadata
+
+    @property
+    def metadata_dependencies(self):
+        """
+        Returns a list of dependencies from role metadata
+        """
+        if self._metadata_dependencies is None:
+            self._metadata_dependencies = []
+
+            if self.metadata is not None:
+                self._metadata_dependencies = self.metadata.get('dependencies') or []
+
+        if not isinstance(self._metadata_dependencies, MutableSequence):
+            raise AnsibleParserError(
+                f"Expected role dependencies to be a list. Role {self} has meta/main.yml with dependencies {self._metadata_dependencies}"
+            )
+
+        return self._metadata_dependencies
 
     @property
     def install_info(self):
@@ -130,7 +159,7 @@ class GalaxyRole(object):
             if os.path.isfile(info_path):
                 try:
                     f = open(info_path, 'r')
-                    self._install_info = yaml.safe_load(f)
+                    self._install_info = yaml_load(f)
                 except Exception:
                     display.vvvvv("Unable to load Galaxy install info for %s" % self.name)
                     return False
@@ -162,7 +191,7 @@ class GalaxyRole(object):
         info_path = os.path.join(self.path, self.META_INSTALL)
         with open(info_path, 'w+') as f:
             try:
-                self._install_info = yaml.safe_dump(info, f)
+                self._install_info = yaml_dump(info, f)
             except Exception:
                 return False
 
@@ -190,7 +219,9 @@ class GalaxyRole(object):
         if role_data:
 
             # first grab the file and save it to a temp location
-            if "github_user" in role_data and "github_repo" in role_data:
+            if self.download_url is not None:
+                archive_url = self.download_url
+            elif "github_user" in role_data and "github_repo" in role_data:
                 archive_url = 'https://github.com/%s/%s/archive/%s.tar.gz' % (role_data["github_user"], role_data["github_repo"], self.version)
             else:
                 archive_url = self.src
@@ -259,10 +290,12 @@ class GalaxyRole(object):
                                                                                                                                          self.name,
                                                                                                                                          role_versions))
 
-                # check if there's a source link for our role_version
+                # check if there's a source link/url for our role_version
                 for role_version in role_versions:
                     if role_version['name'] == self.version and 'source' in role_version:
                         self.src = role_version['source']
+                    if role_version['name'] == self.version and 'download_url' in role_version:
+                        self.download_url = role_version['download_url']
 
                 tmp_file = self.fetch(role_data)
 
@@ -299,15 +332,18 @@ class GalaxyRole(object):
                     raise AnsibleError("this role does not appear to have a meta/main.yml file.")
                 else:
                     try:
-                        self._metadata = yaml.safe_load(role_tar_file.extractfile(meta_file))
+                        self._metadata = yaml_load(role_tar_file.extractfile(meta_file))
                     except Exception:
                         raise AnsibleError("this role does not appear to have a valid meta/main.yml file.")
 
-                # we strip off any higher-level directories for all of the files contained within
-                # the tar file here. The default is 'github_repo-target'. Gerrit instances, on the other
-                # hand, does not have a parent directory at all.
-                installed = False
-                while not installed:
+                paths = self.paths
+                if self.path != paths[0]:
+                    # path can be passed though __init__
+                    # FIXME should this be done in __init__?
+                    paths[:0] = self.path
+                paths_len = len(paths)
+                for idx, path in enumerate(paths):
+                    self.path = path
                     display.display("- extracting %s to %s" % (self.name, self.path))
                     try:
                         if os.path.exists(self.path):
@@ -323,7 +359,9 @@ class GalaxyRole(object):
                         else:
                             os.makedirs(self.path)
 
-                        # now we do the actual extraction to the path
+                        # We strip off any higher-level directories for all of the files
+                        # contained within the tar file here. The default is 'github_repo-target'.
+                        # Gerrit instances, on the other hand, does not have a parent directory at all.
                         for member in members:
                             # we only extract files, and remove any relative path
                             # bits that might be in the file for security purposes
@@ -345,16 +383,11 @@ class GalaxyRole(object):
 
                         # write out the install info file for later use
                         self._write_galaxy_install_info()
-                        installed = True
+                        break
                     except OSError as e:
-                        error = True
-                        if e.errno == errno.EACCES and len(self.paths) > 1:
-                            current = self.paths.index(self.path)
-                            if len(self.paths) > current:
-                                self.path = self.paths[current + 1]
-                                error = False
-                        if error:
-                            raise AnsibleError("Could not update files in %s: %s" % (self.path, to_native(e)))
+                        if e.errno == errno.EACCES and idx < paths_len - 1:
+                            continue
+                        raise AnsibleError("Could not update files in %s: %s" % (self.path, to_native(e)))
 
                 # return the parsed yaml metadata
                 display.display("- %s was installed successfully" % str(self))
@@ -392,12 +425,15 @@ class GalaxyRole(object):
                 if os.path.isfile(meta_path):
                     try:
                         f = open(meta_path, 'r')
-                        self._requirements = yaml.safe_load(f)
+                        self._requirements = yaml_load(f)
                     except Exception:
                         display.vvvvv("Unable to load requirements for %s" % self.name)
                     finally:
                         f.close()
 
                     break
+
+        if not isinstance(self._requirements, MutableSequence):
+            raise AnsibleParserError(f"Expected role dependencies to be a list. Role {self} has meta/requirements.yml {self._requirements}")
 
         return self._requirements

@@ -31,7 +31,11 @@ This documentation covers the version of ``ansible-core`` noted in the upper lef
 
 ``ansible-core`` releases a new major release approximately twice a year. The core application evolves somewhat conservatively, valuing simplicity in language design and setup. Contributors develop and change modules and plugins, hosted in collections since version 2.10, much more quickly.
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Ansible getting started
 
+   getting_started/index
 
 .. toctree::
    :maxdepth: 2
@@ -44,13 +48,23 @@ This documentation covers the version of ``ansible-core`` noted in the upper lef
    :maxdepth: 2
    :caption: Using Ansible Core
 
-   user_guide/index
+   inventory_guide/index
+   command_guide/index
+   playbook_guide/index
+   vault_guide/index
+   module_plugin_guide/index
+   collections_guide/index
+   os_guide/index
+   tips_tricks/index
 
 .. toctree::
    :maxdepth: 2
    :caption: Contributing to Ansible Core
 
    community/index
+   community/contributions
+   community/advanced_index
+   dev_guide/style_guide/index
 
 .. toctree::
    :maxdepth: 2
@@ -58,6 +72,12 @@ This documentation covers the version of ``ansible-core`` noted in the upper lef
 
    dev_guide/index
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Ansible Galaxy
+
+   galaxy/user_guide.rst
+   galaxy/dev_guide.rst
 
 .. toctree::
    :maxdepth: 1

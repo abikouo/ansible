@@ -28,7 +28,7 @@ from jinja2.exceptions import UndefinedError
 from ansible import constants as C
 from ansible.errors import AnsibleError, AnsibleUndefinedVariable
 from ansible.module_utils.six import text_type
-from ansible.module_utils._text import to_native
+from ansible.module_utils._text import to_native, to_text
 from ansible.playbook.attribute import FieldAttribute
 from ansible.utils.display import Display
 
@@ -46,7 +46,7 @@ class Conditional:
     to be run conditionally when a condition is met or skipped.
     '''
 
-    _when = FieldAttribute(isa='list', default=list, extend=True, prepend=True)
+    when = FieldAttribute(isa='list', default=list, extend=True, prepend=True)
 
     def __init__(self, loader=None):
         # when used directly, this class needs a loader, but we want to
@@ -181,6 +181,8 @@ class Conditional:
                 raise AnsibleError("Invalid conditional detected: %s" % to_native(e))
 
             # and finally we generate and template the presented string and look at the resulting string
+            # NOTE The spaces around True and False are intentional to short-circuit literal_eval for
+            #      jinja2_native=False and avoid its expensive calls.
             presented = "{%% if %s %%} True {%% else %%} False {%% endif %%}" % conditional
             val = templar.template(presented, disable_lookups=disable_lookups).strip()
             if val == "True":

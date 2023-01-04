@@ -131,7 +131,7 @@ def _get_type_validator(wanted):
         of the wanted type.
     """
 
-    # Use one our our builtin validators.
+    # Use one of our builtin validators.
     if not callable(wanted):
         if wanted is None:
             # Default type for parameters
@@ -249,9 +249,18 @@ def _list_deprecations(argument_spec, parameters, prefix=''):
     :arg parameters: Dictionary of parameters
 
     :returns: List of dictionaries containing a message and version in which
-        the deprecated parameter will be removed, or an empty list::
+        the deprecated parameter will be removed, or an empty list.
 
-            [{'msg': "Param 'deptest' is deprecated. See the module docs for more information", 'version': '2.9'}]
+    :Example return:
+
+    .. code-block:: python
+
+        [
+            {
+                'msg': "Param 'deptest' is deprecated. See the module docs for more information",
+                'version': '2.9'
+            }
+        ]
     """
 
     deprecations = []
@@ -293,9 +302,7 @@ def _list_no_log_values(argument_spec, params):
     :arg argument_spec: An argument spec dictionary
     :arg params: Dictionary of all parameters
 
-    :returns: Set of strings that should be hidden from output::
-
-        {'secret_dict_value', 'secret_list_item_one', 'secret_list_item_two', 'secret_string'}
+    :returns: :class:`set` of strings that should be hidden from output:
     """
 
     no_log_values = set()
@@ -353,7 +360,7 @@ def _return_datastructure_name(obj):
         for element in obj:
             for subelement in _return_datastructure_name(element):
                 yield subelement
-    elif isinstance(obj, (bool, NoneType)):
+    elif obj is None or isinstance(obj, bool):
         # This must come before int because bools are also ints
         return
     elif isinstance(obj, tuple(list(integer_types) + [float])):
@@ -374,10 +381,13 @@ def _remove_values_conditions(value, no_log_strings, deferred_removals):
         a container type.  The format of each entry is a 2-tuple where the first
         element is the ``value`` parameter and the second value is a new
         container to copy the elements of ``value`` into once iterated.
+
     :returns: if ``value`` is a scalar, returns ``value`` with two exceptions:
+
         1. :class:`~datetime.datetime` objects which are changed into a string representation.
-        2. objects which are in no_log_strings are replaced with a placeholder
-            so that no sensitive data is leaked.
+        2. objects which are in ``no_log_strings`` are replaced with a placeholder
+           so that no sensitive data is leaked.
+
         If ``value`` is a container type, returns a new empty container.
 
     ``deferred_removals`` is added to as a side-effect of this function.
@@ -458,13 +468,13 @@ def _set_defaults(argument_spec, parameters, set_default=True):
 
     Modifies parameters directly.
 
-    :param argument_spec: Argument spec
+    :arg argument_spec: Argument spec
     :type argument_spec: dict
 
-    :param parameters: Parameters to evaluate
+    :arg parameters: Parameters to evaluate
     :type parameters: dict
 
-    :param set_default: Whether or not to set the default values
+    :kwarg set_default: Whether or not to set the default values
     :type set_default: bool
 
     :returns: Set of strings that should not be logged.
@@ -491,7 +501,7 @@ def _set_defaults(argument_spec, parameters, set_default=True):
 
 
 def _sanitize_keys_conditions(value, no_log_strings, ignore_keys, deferred_removals):
-    """ Helper method to sanitize_keys() to build deferred_removals and avoid deep recursion. """
+    """ Helper method to :func:`sanitize_keys` to build ``deferred_removals`` and avoid deep recursion. """
     if isinstance(value, (text_type, binary_type)):
         return value
 
@@ -564,16 +574,16 @@ def _validate_argument_types(argument_spec, parameters, prefix='', options_conte
     functions are returned. If any parameter fails to validate, it will not
     be in the returned parameters.
 
-    :param argument_spec: Argument spec
+    :arg argument_spec: Argument spec
     :type argument_spec: dict
 
-    :param parameters: Parameters
+    :arg parameters: Parameters
     :type parameters: dict
 
-    :param prefix: Name of the parent key that contains the spec. Used in the error message
+    :kwarg prefix: Name of the parent key that contains the spec. Used in the error message
     :type prefix: str
 
-    :param options_context: List of contexts?
+    :kwarg options_context: List of contexts?
     :type options_context: list
 
     :returns: Two item tuple containing validated and coerced parameters
@@ -641,27 +651,24 @@ def _validate_argument_values(argument_spec, parameters, options_context=None, e
             if param in parameters:
                 # Allow one or more when type='list' param with choices
                 if isinstance(parameters[param], list):
-                    diff_list = ", ".join([item for item in parameters[param] if item not in choices])
+                    diff_list = [item for item in parameters[param] if item not in choices]
                     if diff_list:
                         choices_str = ", ".join([to_native(c) for c in choices])
-                        msg = "value of %s must be one or more of: %s. Got no match for: %s" % (param, choices_str, diff_list)
+                        diff_str = ", ".join(diff_list)
+                        msg = "value of %s must be one or more of: %s. Got no match for: %s" % (param, choices_str, diff_str)
                         if options_context:
                             msg = "{0} found in {1}".format(msg, " -> ".join(options_context))
                         errors.append(ArgumentValueError(msg))
                 elif parameters[param] not in choices:
                     # PyYaml converts certain strings to bools. If we can unambiguously convert back, do so before checking
                     # the value. If we can't figure this out, module author is responsible.
-                    lowered_choices = None
                     if parameters[param] == 'False':
-                        lowered_choices = lenient_lowercase(choices)
                         overlap = BOOLEANS_FALSE.intersection(choices)
                         if len(overlap) == 1:
                             # Extract from a set
                             (parameters[param],) = overlap
 
                     if parameters[param] == 'True':
-                        if lowered_choices is None:
-                            lowered_choices = lenient_lowercase(choices)
                         overlap = BOOLEANS_TRUE.intersection(choices)
                         if len(overlap) == 1:
                             (parameters[param],) = overlap
@@ -680,7 +687,10 @@ def _validate_argument_values(argument_spec, parameters, options_context=None, e
 
 
 def _validate_sub_spec(argument_spec, parameters, prefix='', options_context=None, errors=None, no_log_values=None, unsupported_parameters=None):
-    """Validate sub argument spec. This function is recursive."""
+    """Validate sub argument spec.
+
+    This function is recursive.
+    """
 
     if options_context is None:
         options_context = []
@@ -711,22 +721,23 @@ def _validate_sub_spec(argument_spec, parameters, prefix='', options_context=Non
             options_context.append(param)
 
             # Make sure we can iterate over the elements
-            if isinstance(parameters[param], dict):
+            if not isinstance(parameters[param], Sequence) or isinstance(parameters[param], string_types):
                 elements = [parameters[param]]
             else:
                 elements = parameters[param]
 
             for idx, sub_parameters in enumerate(elements):
+                no_log_values.update(set_fallbacks(sub_spec, sub_parameters))
+
                 if not isinstance(sub_parameters, dict):
                     errors.append(SubParameterTypeError("value of '%s' must be of type dict or list of dicts" % param))
+                    continue
 
                 # Set prefix for warning messages
                 new_prefix = prefix + param
                 if wanted == 'list':
                     new_prefix += '[%d]' % idx
                 new_prefix += '.'
-
-                no_log_values.update(set_fallbacks(sub_spec, sub_parameters))
 
                 alias_warnings = []
                 alias_deprecations = []
@@ -811,15 +822,15 @@ def set_fallbacks(argument_spec, parameters):
 
 
 def sanitize_keys(obj, no_log_strings, ignore_keys=frozenset()):
-    """ Sanitize the keys in a container object by removing no_log values from key names.
+    """Sanitize the keys in a container object by removing ``no_log`` values from key names.
 
-    This is a companion function to the `remove_values()` function. Similar to that function,
-    we make use of deferred_removals to avoid hitting maximum recursion depth in cases of
+    This is a companion function to the :func:`remove_values` function. Similar to that function,
+    we make use of ``deferred_removals`` to avoid hitting maximum recursion depth in cases of
     large data structures.
 
-    :param obj: The container object to sanitize. Non-container objects are returned unmodified.
-    :param no_log_strings: A set of string values we do not want logged.
-    :param ignore_keys: A set of string values of keys to not sanitize.
+    :arg obj: The container object to sanitize. Non-container objects are returned unmodified.
+    :arg no_log_strings: A set of string values we do not want logged.
+    :kwarg ignore_keys: A set of string values of keys to not sanitize.
 
     :returns: An object with sanitized keys.
     """
@@ -855,12 +866,13 @@ def sanitize_keys(obj, no_log_strings, ignore_keys=frozenset()):
 
 
 def remove_values(value, no_log_strings):
-    """ Remove strings in no_log_strings from value.  If value is a container
-    type, then remove a lot more.
+    """Remove strings in ``no_log_strings`` from value.
 
-    Use of deferred_removals exists, rather than a pure recursive solution,
+    If value is a container type, then remove a lot more.
+
+    Use of ``deferred_removals`` exists, rather than a pure recursive solution,
     because of the potential to hit the maximum recursion depth when dealing with
-    large amounts of data (see issue #24560).
+    large amounts of data (see `issue #24560 <https://github.com/ansible/ansible/issues/24560>`_).
     """
 
     deferred_removals = deque()

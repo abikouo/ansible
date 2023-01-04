@@ -16,6 +16,75 @@ Ansible 3 is based on Ansible-Base 2.10, which is the same major release as Ansi
 
 We suggest you read this page along with the `Ansible 3 Changelog <https://github.com/ansible-community/ansible-build-data/blob/main/3/CHANGELOG-v3.rst>`_ to understand what updates you may need to make.
 
+Porting Guide for v3.4.0
+========================
+
+Known Issues
+------------
+
+dellemc.openmanage
+~~~~~~~~~~~~~~~~~~
+
+- idrac_user - Issue(192043) Module may error out with the message ``unable to perform the import or export operation because there are pending attribute changes or a configuration job is in progress``. Wait for the job to complete and run the task again.
+- ome_configuration_compliance_info - Issue(195592) Module may error out with the message ``unable to process the request because an error occurred``. If the issue persists, report it to the system administrator.
+- ome_smart_fabric - Issue(185322) Only three design types are supported by OpenManage Enterprise Modular but the module successfully creates a fabric when the design type is not supported.
+- ome_smart_fabric_uplink - Issue(186024) ome_smart_fabric_uplink module does not allow the creation of multiple uplinks of the same name even though this is supported by OpenManage Enterprise Modular. If an uplink is created using the same name as an existing uplink, the existing uplink is modified.
+
+Major Changes
+-------------
+
+Ansible-base
+~~~~~~~~~~~~
+
+- ansible-test - Tests run with the ``centos6`` and ``default`` test containers now use a PyPI proxy container to access PyPI when Python 2.6 is used. This allows tests running under Python 2.6 to continue functioning even though PyPI is discontinuing support for non-SNI capable clients.
+
+community.postgresql
+~~~~~~~~~~~~~~~~~~~~
+
+- postgresql_query - the default value of the ``as_single_query`` option will be changed to ``yes`` in community.postgresql 2.0.0 (https://github.com/ansible-collections/community.postgresql/issues/85).
+
+netapp.ontap
+~~~~~~~~~~~~
+
+- na_ontap_autosupport - Added REST support to the module.
+
+Deprecated Features
+-------------------
+
+community.aws
+~~~~~~~~~~~~~
+
+- ec2_vpc_endpoint_info - the ``query`` option has been deprecated and will be removed after 2022-12-01 (https://github.com/ansible-collections/community.aws/pull/346). The ec2_vpc_endpoint_info now defaults to listing information about endpoints. The ability to search for information about available services has been moved to the dedicated module ``ec2_vpc_endpoint_service_info``.
+
+community.docker
+~~~~~~~~~~~~~~~~
+
+- docker_* modules and plugins, except ``docker_swarm`` connection plugin and ``docker_compose`` and ``docker_stack*` modules - the current default ``localhost`` for ``tls_hostname`` is deprecated. In community.docker 2.0.0 it will be computed from ``docker_host`` instead (https://github.com/ansible-collections/community.docker/pull/134).
+
+Porting Guide for v3.3.0
+========================
+
+Major Changes
+-------------
+
+community.mysql
+~~~~~~~~~~~~~~~
+
+- mysql_user - the ``REQUIRESSL`` is an alias for the ``ssl`` key in the ``tls_requires`` option in ``community.mysql`` 2.0.0 and support will be dropped altogether in ``community.mysql`` 3.0.0 (https://github.com/ansible-collections/community.mysql/issues/121).
+
+Deprecated Features
+-------------------
+
+community.vmware
+~~~~~~~~~~~~~~~~
+
+- vmware_vmkernel_ip_config - deprecate in favor of vmware_vmkernel (https://github.com/ansible-collections/community.vmware/pull/667).
+
+f5networks.f5_modules
+~~~~~~~~~~~~~~~~~~~~~
+
+- Support for Python versions earlier than 3.5 is being deprecated
+
 Porting Guide for v3.2.0
 ========================
 
@@ -115,7 +184,7 @@ community.general
 - puppet - deprecated undocumented parameter ``show_diff``, will be removed in 7.0.0. (https://github.com/ansible-collections/community.general/pull/1927).
 - runit - unused parameter ``dist`` marked for deprecation (https://github.com/ansible-collections/community.general/pull/1830).
 - slackpkg - deprecated invalid parameter alias ``update-cache``, will be removed in 5.0.0 (https://github.com/ansible-collections/community.general/pull/1927).
-- urmpi - deprecated invalid parameter aliases ``update-cache`` and ``no-recommends``, will be removed in 5.0.0 (https://github.com/ansible-collections/community.general/pull/1927).
+- urpmi - deprecated invalid parameter aliases ``update-cache`` and ``no-recommends``, will be removed in 5.0.0 (https://github.com/ansible-collections/community.general/pull/1927).
 - xbps - deprecated invalid parameter alias ``update-cache``, will be removed in 5.0.0 (https://github.com/ansible-collections/community.general/pull/1927).
 - xfconf - returning output as facts is deprecated, this will be removed in community.general 4.0.0. Please register the task output in a variable and use it instead. You can already switch to the new behavior now by using the new ``disable_facts`` option (https://github.com/ansible-collections/community.general/pull/1747).
 
@@ -138,7 +207,7 @@ Breaking Changes
 Ansible-base
 ~~~~~~~~~~~~
 
-- ansible-galaxy login command has been removed (see https://github.com/ansible/ansible/issues/71560)
+- ansible-galaxy login command has been removed ( see `issue 71560 <https://github.com/ansible/ansible/issues/71560>`_)
 
 ansible.utils
 ~~~~~~~~~~~~~
@@ -193,7 +262,7 @@ community.general
 - The Google cloud inventory script ``gce.py`` has been migrated to the ``community.google`` collection. Install the ``community.google`` collection in order to continue using it.
 - archive - remove path folder itself when ``remove`` parameter is true (https://github.com/ansible-collections/community.general/issues/1041).
 - log_plays callback - add missing information to the logs generated by the callback plugin. This changes the log message format (https://github.com/ansible-collections/community.general/pull/442).
-- passwordstore lookup plugin - now parsing a password store entry as YAML if possible, skipping the first line (which by convention only contains the password and nothing else). If it cannot be parsed as YAML, the old ``key: value`` parser will be used to process the entry. Can break backwards compatibility if YAML formatted code was parsed in a non-YAML interpreted way, e.g. ``foo: [bar, baz]`` will become a list with two elements in the new version, but a string ``'[bar, baz]'`` in the old (https://github.com/ansible-collections/community.general/issues/1673).
+- passwordstore lookup plugin - now parsing a password store entry as YAML if possible, skipping the first line (which by convention only contains the password and nothing else). If it cannot be parsed as YAML, the old ``key: value`` parser will be used to process the entry. Can break backwards compatibility if YAML formatted code was parsed in a non-YAML interpreted way, for example ``foo: [bar, baz]``, will become a list with two elements in the new version, but a string ``'[bar, baz]'`` in the old (https://github.com/ansible-collections/community.general/issues/1673).
 - pkgng - passing ``name: *`` with ``state: absent`` will no longer remove every installed package from the system. It is now a noop. (https://github.com/ansible-collections/community.general/pull/569).
 - pkgng - passing ``name: *`` with ``state: latest`` or ``state: present`` will no longer install every package from the configured package repositories. Instead, ``name: *, state: latest`` will upgrade all already-installed packages, and ``name: *, state: present`` is a noop. (https://github.com/ansible-collections/community.general/pull/569).
 - proxmox_kvm - recognize ``force=yes`` in conjunction with ``state=absent`` to forcibly remove a running VM (https://github.com/ansible-collections/community.general/pull/849).
@@ -240,12 +309,12 @@ dellemc.os10
 ~~~~~~~~~~~~
 
 - os10_bgp - Changed "subnet"  key as list format instead of dictionary format under "listen" key to support multiple neighbor prefix for listen command
-- os10_bgp - Changed "vrf" key as list format instead of dictionary format to supprot multiple VRF in router BGP and changed the "vrf" key name to "vrfs"
+- os10_bgp - Changed "vrf" key as list format instead of dictionary format to support multiple VRF in router BGP and changed the "vrf" key name to "vrfs"
 
 ngine_io.cloudstack
 ~~~~~~~~~~~~~~~~~~~
 
-- Authentication option using INI files e.g. ``cloudstack.ini`` has been removed. The only supported option to authenticate is by using the module params with fallback to the ENV variables.
+- Authentication option using INI files for example ``cloudstack.ini``, has been removed. The only supported option to authenticate is by using the module params with fallback to the ENV variables.
 - default zone deprecation - The `zone` param default value, across multiple modules, has been deprecated due to unreliable API (https://github.com/ngine-io/ansible-collection-cloudstack/pull/62).
 
 Major Changes
@@ -323,7 +392,7 @@ kubernetes.core
 - k8s_* - Add support for vaulted kubeconfig and src (https://github.com/ansible-collections/kubernetes.core/pull/193).
 - k8s_auth - Module migrated from Ansible 2.9 to Kubernetes collection.
 - k8s_config_resource_name - Filter plugin migrated from Ansible 2.9 to Kubernetes collection.
-- k8s_exec - New module for executing commands on pods via Kubernetes API (https://github.com/ansible-collections/kubernetes.core/pull/14).
+- k8s_exec - New module for executing commands on pods through Kubernetes API (https://github.com/ansible-collections/kubernetes.core/pull/14).
 - k8s_exec - Return rc for the command executed (https://github.com/ansible-collections/kubernetes.core/pull/158).
 - k8s_info - Module migrated from Ansible 2.9 to Kubernetes collection.
 - k8s_log - New module for retrieving pod logs (https://github.com/ansible-collections/kubernetes.core/pull/16).
@@ -337,10 +406,10 @@ netbox.netbox
 
 - nb_inventory - Add ``dns_name`` option that adds ``dns_name`` to the host when ``True`` and device has a primary IP address. (#394)
 - nb_inventory - Add ``status`` as a ``group_by`` option. (398)
-- nb_inventory - Move around ``extracted_primary_ip`` to allow for ``config_context`` or ``custom_field`` to overwite. (#377)
+- nb_inventory - Move around ``extracted_primary_ip`` to allow for ``config_context`` or ``custom_field`` to overwrite. (#377)
 - nb_inventory - Services are now a list of integers due to NetBox 2.10 changes. (#396)
 - nb_lookup - Allow ID to be passed in and use ``.get`` instead of ``.filter``. (#376)
-- nb_lookup - Allow ``api_endpoint`` and ``token`` to be found via env. (#391)
+- nb_lookup - Allow ``api_endpoint`` and ``token`` to be found through env. (#391)
 
 ovirt.ovirt
 ~~~~~~~~~~~
@@ -380,7 +449,7 @@ community.docker
 - docker_image - the ``source`` option is now mandatory (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_image - the ``use_tls`` option has been removed. Use ``tls`` and ``validate_certs`` instead (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_image - the default of the ``build.pull`` option changed to ``false`` (https://github.com/ansible-collections/community.docker/pull/1).
-- docker_image_facts - this alias is on longer availabe, use ``docker_image_info`` instead (https://github.com/ansible-collections/community.docker/pull/1).
+- docker_image_facts - this alias is on longer available, use ``docker_image_info`` instead (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_network - no longer returns ``ansible_facts`` (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_network - the ``ipam_options`` option has been removed. Use ``ipam_config`` instead (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_service - no longer returns ``ansible_facts`` (https://github.com/ansible-collections/community.docker/pull/1).
@@ -522,7 +591,7 @@ cisco.nxos
 
 - Deprecated `nxos_bgp` and `nxos_bgp_neighbor` modules in favor of `nxos_bgp_global` resource module.
 - Deprecated `nxos_interface_ospf` in favor of `nxos_ospf_interfaces` Resource Module.
-- Deprecated `nxos_smu` in favour of `nxos_rpm` module.
+- Deprecated `nxos_smu` in favor of `nxos_rpm` module.
 - The `nxos_ospf_vrf` module is deprecated by `nxos_ospfv2` and `nxos_ospfv3` Resource Modules.
 
 community.aws

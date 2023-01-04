@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2014, 2015 YAEGASHI Takeshi <yaegashi@debian.org>
@@ -37,6 +36,8 @@ options:
     - The marker line template.
     - C({mark}) will be replaced with the values in C(marker_begin) (default="BEGIN") and C(marker_end) (default="END").
     - Using a custom marker without the C({mark}) variable may result in the block being repeatedly inserted on subsequent playbook runs.
+    - Multi-line markers are not supported and will result in the block being repeatedly inserted on subsequent playbook runs.
+    - A newline is automatically appended by the module to C(marker_begin) and C(marker_end).
     type: str
     default: '# {mark} ANSIBLE MANAGED BLOCK'
   block:
@@ -51,6 +52,8 @@ options:
     - If specified and no begin/ending C(marker) lines are found, the block will be inserted after the last match of specified regular expression.
     - A special value is available; C(EOF) for inserting the block at the end of the file.
     - If specified regular expression has no matches, C(EOF) will be used instead.
+    - The presence of the multiline flag (?m) in the regular expression controls whether the match is done line by line or with multiple lines.
+      This behaviour was added in ansible-core 2.14.
     type: str
     choices: [ EOF, '*regex*' ]
     default: EOF
@@ -59,6 +62,8 @@ options:
     - If specified and no begin/ending C(marker) lines are found, the block will be inserted before the last match of specified regular expression.
     - A special value is available; C(BOF) for inserting the block at the beginning of the file.
     - If specified regular expression has no matches, the block will be inserted at the end of the file.
+    - The presence of the multiline flag (?m) in the regular expression controls whether the match is done line by line or with multiple lines.
+      This behaviour was added in ansible-core 2.14.
     type: str
     choices: [ BOF, '*regex*' ]
   create:
@@ -86,20 +91,33 @@ options:
     default: END
     version_added: '2.5'
 notes:
-  - This module supports check mode.
   - When using 'with_*' loops be aware that if you do not set a unique mark the block will be overwritten on each iteration.
   - As of Ansible 2.3, the I(dest) option has been changed to I(path) as default, but I(dest) still works as well.
   - Option I(follow) has been removed in Ansible 2.5, because this module modifies the contents of the file so I(follow=no) doesn't make sense.
   - When more then one block should be handled in one file you must change the I(marker) per task.
 extends_documentation_fragment:
-- files
-- validate
+    - action_common_attributes
+    - action_common_attributes.files
+    - files
+    - validate
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: full
+    safe_file_operations:
+      support: full
+    platform:
+      support: full
+      platforms: posix
+    vault:
+      support: none
 '''
 
 EXAMPLES = r'''
 # Before Ansible 2.3, option 'dest' or 'name' was used instead of 'path'
 - name: Insert/Update "Match User" configuration block in /etc/ssh/sshd_config
-  blockinfile:
+  ansible.builtin.blockinfile:
     path: /etc/ssh/sshd_config
     block: |
       Match User ansible-agent
@@ -107,7 +125,7 @@ EXAMPLES = r'''
 
 - name: Insert/Update eth0 configuration stanza in /etc/network/interfaces
         (it might be better to copy files into /etc/network/interfaces.d/)
-  blockinfile:
+  ansible.builtin.blockinfile:
     path: /etc/network/interfaces
     block: |
       iface eth0 inet static
@@ -115,14 +133,14 @@ EXAMPLES = r'''
           netmask 255.255.255.0
 
 - name: Insert/Update configuration using a local file and validate it
-  blockinfile:
-    block: "{{ lookup('file', './local/sshd_config') }}"
+  ansible.builtin.blockinfile:
+    block: "{{ lookup('ansible.builtin.file', './local/sshd_config') }}"
     path: /etc/ssh/sshd_config
     backup: yes
     validate: /usr/sbin/sshd -T -f %s
 
 - name: Insert/Update HTML surrounded by custom markers after <body> line
-  blockinfile:
+  ansible.builtin.blockinfile:
     path: /var/www/html/index.html
     marker: "<!-- {mark} ANSIBLE MANAGED BLOCK -->"
     insertafter: "<body>"
@@ -131,13 +149,13 @@ EXAMPLES = r'''
       <p>Last updated on {{ ansible_date_time.iso8601 }}</p>
 
 - name: Remove HTML as well as surrounding markers
-  blockinfile:
+  ansible.builtin.blockinfile:
     path: /var/www/html/index.html
     marker: "<!-- {mark} ANSIBLE MANAGED BLOCK -->"
     block: ""
 
 - name: Add mappings to /etc/hosts
-  blockinfile:
+  ansible.builtin.blockinfile:
     path: /etc/hosts
     block: |
       {{ item.ip }} {{ item.name }}
@@ -146,6 +164,14 @@ EXAMPLES = r'''
     - { name: host1, ip: 10.10.1.10 }
     - { name: host2, ip: 10.10.1.11 }
     - { name: host3, ip: 10.10.1.12 }
+
+- name: Search with a multiline search flags regex and if found insert after
+  blockinfile:
+    path: listener.ora
+    block: "{{ listener_line | indent(width=8, first=True) }}"
+    insertafter: '(?m)SID_LIST_LISTENER_DG =\n.*\(SID_LIST ='
+    marker: "    <!-- {mark} ANSIBLE MANAGED BLOCK -->"
+
 '''
 
 import re
@@ -153,7 +179,7 @@ import os
 import tempfile
 from ansible.module_utils.six import b
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils._text import to_bytes
+from ansible.module_utils._text import to_bytes, to_native
 
 
 def write_changes(module, contents, path):
@@ -230,9 +256,8 @@ def main():
         original = None
         lines = []
     else:
-        f = open(path, 'rb')
-        original = f.read()
-        f.close()
+        with open(path, 'rb') as f:
+            original = f.read()
         lines = original.splitlines(True)
 
     diff = {'before': '',
@@ -265,9 +290,6 @@ def main():
     marker0 = re.sub(b(r'{mark}'), b(params['marker_begin']), marker) + b(os.linesep)
     marker1 = re.sub(b(r'{mark}'), b(params['marker_end']), marker) + b(os.linesep)
     if present and block:
-        # Escape sequences like '\n' need to be handled in Ansible 1.x
-        if module.ansible_version.startswith('1.'):
-            block = re.sub('', block, '')
         if not block.endswith(b(os.linesep)):
             block += b(os.linesep)
         blocklines = [marker0] + block.splitlines(True) + [marker1]
@@ -284,9 +306,17 @@ def main():
     if None in (n0, n1):
         n0 = None
         if insertre is not None:
-            for i, line in enumerate(lines):
-                if insertre.search(line):
-                    n0 = i
+            if insertre.flags & re.MULTILINE:
+                match = insertre.search(original)
+                if match:
+                    if insertafter:
+                        n0 = to_native(original).count('\n', 0, match.end())
+                    elif insertbefore:
+                        n0 = to_native(original).count('\n', 0, match.start())
+            else:
+                for i, line in enumerate(lines):
+                    if insertre.search(line):
+                        n0 = i
             if n0 is None:
                 n0 = len(lines)
             elif insertafter is not None:

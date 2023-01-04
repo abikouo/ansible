@@ -100,7 +100,7 @@ def get_ps(module, pattern):
     if rc == 0:
         for line in psout.splitlines():
             if pattern in line:
-                # FIXME: should add logic to prevent matching 'self', though that should be extreemly rare
+                # FIXME: should add logic to prevent matching 'self', though that should be extremely rare
                 found = True
                 break
     return found
@@ -212,7 +212,7 @@ def daemonize(module, cmd):
         while fds:
             rfd, wfd, efd = select.select(fds, [], fds, 1)
             if (rfd + wfd + efd) or p.poll():
-                for out in fds:
+                for out in list(fds):
                     if out in rfd:
                         data = os.read(out.fileno(), chunk)
                         if not data:

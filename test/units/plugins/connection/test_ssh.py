@@ -27,7 +27,7 @@ import pytest
 from ansible import constants as C
 from ansible.errors import AnsibleAuthenticationFailure
 from units.compat import unittest
-from units.compat.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock, PropertyMock
 from ansible.errors import AnsibleError, AnsibleConnectionFailure, AnsibleFileNotFound
 from ansible.module_utils.compat.selectors import SelectorKey, EVENT_READ
 from ansible.module_utils.six.moves import shlex_quote
@@ -80,6 +80,8 @@ class TestConnectionBaseClass(unittest.TestCase):
         pc = PlayContext()
         new_stdin = StringIO()
         conn = connection_loader.get('ssh', pc, new_stdin)
+        conn.get_option = MagicMock()
+        conn.get_option.return_value = ""
         conn._build_command('ssh', 'ssh')
 
     def test_plugins_connection_ssh_exec_command(self):
@@ -100,6 +102,7 @@ class TestConnectionBaseClass(unittest.TestCase):
     def test_plugins_connection_ssh__examine_output(self):
         pc = PlayContext()
         new_stdin = StringIO()
+        become_success_token = b'BECOME-SUCCESS-abcdefghijklmnopqrstuvxyz'
 
         conn = connection_loader.get('ssh', pc, new_stdin)
         conn.set_become_plugin(become_loader.get('sudo'))
@@ -110,24 +113,16 @@ class TestConnectionBaseClass(unittest.TestCase):
         conn.become.check_missing_password = MagicMock()
 
         def _check_password_prompt(line):
-            if b'foo' in line:
-                return True
-            return False
+            return b'foo' in line
 
         def _check_become_success(line):
-            if b'BECOME-SUCCESS-abcdefghijklmnopqrstuvxyz' in line:
-                return True
-            return False
+            return become_success_token in line
 
         def _check_incorrect_password(line):
-            if b'incorrect password' in line:
-                return True
-            return False
+            return b'incorrect password' in line
 
         def _check_missing_password(line):
-            if b'bad password' in line:
-                return True
-            return False
+            return b'bad password' in line
 
         # test examining output for prompt
         conn._flags = dict(
@@ -170,15 +165,32 @@ class TestConnectionBaseClass(unittest.TestCase):
 
         pc.prompt = False
         conn.become.prompt = False
-        pc.success_key = u'BECOME-SUCCESS-abcdefghijklmnopqrstuvxyz'
-        conn.become.success = u'BECOME-SUCCESS-abcdefghijklmnopqrstuvxyz'
-        output, unprocessed = conn._examine_output(u'source', u'state', b'line 1\nline 2\nBECOME-SUCCESS-abcdefghijklmnopqrstuvxyz\nline 3\n', False)
+        pc.success_key = str(become_success_token)
+        conn.become.success = str(become_success_token)
+        output, unprocessed = conn._examine_output(u'source', u'state', b'line 1\nline 2\n%s\nline 3\n' % become_success_token, False)
         self.assertEqual(output, b'line 1\nline 2\nline 3\n')
         self.assertEqual(unprocessed, b'')
         self.assertFalse(conn._flags['become_prompt'])
         self.assertTrue(conn._flags['become_success'])
         self.assertFalse(conn._flags['become_error'])
         self.assertFalse(conn._flags['become_nopasswd_error'])
+
+        # test we dont detect become success from ssh debug: lines
+        conn._flags = dict(
+            become_prompt=False,
+            become_success=False,
+            become_error=False,
+            become_nopasswd_error=False,
+        )
+
+        pc.prompt = False
+        conn.become.prompt = True
+        pc.success_key = str(become_success_token)
+        conn.become.success = str(become_success_token)
+        output, unprocessed = conn._examine_output(u'source', u'state', b'line 1\nline 2\ndebug1: %s\nline 3\n' % become_success_token, False)
+        self.assertEqual(output, b'line 1\nline 2\ndebug1: %s\nline 3\n' % become_success_token)
+        self.assertEqual(unprocessed, b'')
+        self.assertFalse(conn._flags['become_success'])
 
         # test examining output for become failure
         conn._flags = dict(
@@ -232,7 +244,7 @@ class TestConnectionBaseClass(unittest.TestCase):
         conn._bare_run.return_value = (0, '', '')
         conn.host = "some_host"
 
-        conn.set_option('retries', 9)
+        conn.set_option('reconnection_retries', 9)
         conn.set_option('ssh_transfer_method', None)  # unless set to None scp_if_ssh is ignored
 
         # Test with SCP_IF_SSH set to smart
@@ -290,7 +302,7 @@ class TestConnectionBaseClass(unittest.TestCase):
         conn._bare_run.return_value = (0, '', '')
         conn.host = "some_host"
 
-        conn.set_option('retries', 9)
+        conn.set_option('reconnection_retries', 9)
         conn.set_option('ssh_transfer_method', None)  # unless set to None scp_if_ssh is ignored
 
         # Test with SCP_IF_SSH set to smart
@@ -533,7 +545,7 @@ class TestSSHConnectionRun(object):
 class TestSSHConnectionRetries(object):
     def test_incorrect_password(self, monkeypatch):
         self.conn.set_option('host_key_checking', False)
-        self.conn.set_option('retries', 5)
+        self.conn.set_option('reconnection_retries', 5)
         monkeypatch.setattr('time.sleep', lambda x: None)
 
         self.mock_popen_res.stdout.read.side_effect = [b'']
@@ -558,7 +570,7 @@ class TestSSHConnectionRetries(object):
 
     def test_retry_then_success(self, monkeypatch):
         self.conn.set_option('host_key_checking', False)
-        self.conn.set_option('retries', 3)
+        self.conn.set_option('reconnection_retries', 3)
 
         monkeypatch.setattr('time.sleep', lambda x: None)
 
@@ -587,7 +599,7 @@ class TestSSHConnectionRetries(object):
 
     def test_multiple_failures(self, monkeypatch):
         self.conn.set_option('host_key_checking', False)
-        self.conn.set_option('retries', 9)
+        self.conn.set_option('reconnection_retries', 9)
 
         monkeypatch.setattr('time.sleep', lambda x: None)
 
@@ -610,7 +622,7 @@ class TestSSHConnectionRetries(object):
 
     def test_abitrary_exceptions(self, monkeypatch):
         self.conn.set_option('host_key_checking', False)
-        self.conn.set_option('retries', 9)
+        self.conn.set_option('reconnection_retries', 9)
 
         monkeypatch.setattr('time.sleep', lambda x: None)
 
@@ -623,7 +635,7 @@ class TestSSHConnectionRetries(object):
 
     def test_put_file_retries(self, monkeypatch):
         self.conn.set_option('host_key_checking', False)
-        self.conn.set_option('retries', 3)
+        self.conn.set_option('reconnection_retries', 3)
 
         monkeypatch.setattr('time.sleep', lambda x: None)
         monkeypatch.setattr('ansible.plugins.connection.ssh.os.path.exists', lambda x: True)
@@ -654,7 +666,7 @@ class TestSSHConnectionRetries(object):
 
     def test_fetch_file_retries(self, monkeypatch):
         self.conn.set_option('host_key_checking', False)
-        self.conn.set_option('retries', 3)
+        self.conn.set_option('reconnection_retries', 3)
 
         monkeypatch.setattr('time.sleep', lambda x: None)
         monkeypatch.setattr('ansible.plugins.connection.ssh.os.path.exists', lambda x: True)

@@ -27,13 +27,16 @@
       when: ansible_distribution != 'Alpine'
 
     - name: install faketime packages - Alpine
+      # NOTE: The `faketime` package is currently only available in the
+      # NOTE: `edge` branch.
+      # FIXME: If it ever becomes available in the `main` repository for
+      # FIXME: currently tested Alpine versions, the `--repository=...`
+      # FIXME: option can be dropped.
       command: apk add -U {{ faketime_pkg }} --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing
       when: ansible_distribution == 'Alpine'
 
     - name: Find libfaketime path
       shell: '{{ list_pkg_files }} {{ faketime_pkg }} | grep -F libfaketime.so.1'
-      args:
-        warn: false
       register: libfaketime_path
       when: list_pkg_files is defined
 
@@ -82,3 +85,15 @@
     FAKETIME: "+0y x10"
     LD_PRELOAD: "/usr/lib/faketime/libfaketime.so.1"
   when: ansible_distribution == 'Alpine'
+
+- name: See if /etc/pam.d/crond exists
+  stat:
+    path: /etc/pam.d/crond
+  register: pamd
+
+# https://github.com/lxc/lxc/issues/661#issuecomment-222444916
+# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=726661
+- name: Work around containers not being able to write to /proc/self/loginuid
+  command: sed -i '/pam_loginuid\.so$/ s/required/optional/' /etc/pam.d/crond
+  when:
+    - pamd.stat.exists

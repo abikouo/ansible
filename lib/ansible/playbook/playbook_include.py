@@ -24,7 +24,7 @@ import os
 import ansible.constants as C
 from ansible.errors import AnsibleParserError, AnsibleAssertionError
 from ansible.module_utils._text import to_bytes
-from ansible.module_utils.six import iteritems, string_types
+from ansible.module_utils.six import string_types
 from ansible.parsing.splitter import split_args, parse_kv
 from ansible.parsing.yaml.objects import AnsibleBaseYAMLObject, AnsibleMapping
 from ansible.playbook.attribute import FieldAttribute
@@ -41,8 +41,8 @@ display = Display()
 
 class PlaybookInclude(Base, Conditional, Taggable):
 
-    _import_playbook = FieldAttribute(isa='string')
-    _vars = FieldAttribute(isa='dict', default=dict)
+    import_playbook = FieldAttribute(isa='string')
+    vars_val = FieldAttribute(isa='dict', default=dict, alias='vars')
 
     @staticmethod
     def load(data, basedir, variable_manager=None, loader=None):
@@ -65,7 +65,7 @@ class PlaybookInclude(Base, Conditional, Taggable):
 
         all_vars = self.vars.copy()
         if variable_manager:
-            all_vars.update(variable_manager.get_vars())
+            all_vars |= variable_manager.get_vars()
 
         templar = Templar(loader=loader, variables=all_vars)
 
@@ -105,8 +105,7 @@ class PlaybookInclude(Base, Conditional, Taggable):
             if new_obj.when and isinstance(entry, Play):
                 entry._included_conditional = new_obj.when[:]
 
-            temp_vars = entry.vars.copy()
-            temp_vars.update(new_obj.vars)
+            temp_vars = entry.vars | new_obj.vars
             param_tags = temp_vars.pop('tags', None)
             if param_tags is not None:
                 entry.tags.extend(param_tags.split(','))
@@ -120,7 +119,7 @@ class PlaybookInclude(Base, Conditional, Taggable):
             # those attached to each block (if any)
             if new_obj.when:
                 for task_block in (entry.pre_tasks + entry.roles + entry.tasks + entry.post_tasks):
-                    task_block._attributes['when'] = new_obj.when[:] + task_block.when[:]
+                    task_block._when = new_obj.when[:] + task_block.when[:]
 
         return pb
 
@@ -139,7 +138,7 @@ class PlaybookInclude(Base, Conditional, Taggable):
         if isinstance(ds, AnsibleBaseYAMLObject):
             new_ds.ansible_pos = ds.ansible_pos
 
-        for (k, v) in iteritems(ds):
+        for (k, v) in ds.items():
             if k in C._ACTION_IMPORT_PLAYBOOK:
                 self._preprocess_import(ds, new_ds, k, v)
             else:
@@ -158,7 +157,6 @@ class PlaybookInclude(Base, Conditional, Taggable):
         '''
         Splits the playbook import line up into filename and parameters
         '''
-
         if v is None:
             raise AnsibleParserError("playbook import parameter is missing", obj=ds)
         elif not isinstance(v, string_types):
@@ -169,16 +167,5 @@ class PlaybookInclude(Base, Conditional, Taggable):
         items = split_args(v)
         if len(items) == 0:
             raise AnsibleParserError("import_playbook statements must specify the file name to import", obj=ds)
-        else:
-            new_ds['import_playbook'] = items[0].strip()
-            if len(items) > 1:
-                display.deprecated("Additional parameters in import_playbook statements are deprecated. "
-                                   "Use 'vars' instead. See 'import_playbook' documentation for examples.", version='2.14')
-                # rejoin the parameter portion of the arguments and
-                # then use parse_kv() to get a dict of params back
-                params = parse_kv(" ".join(items[1:]))
-                if 'tags' in params:
-                    new_ds['tags'] = params.pop('tags')
-                if 'vars' in new_ds:
-                    raise AnsibleParserError("import_playbook parameters cannot be mixed with 'vars' entries for import statements", obj=ds)
-                new_ds['vars'] = params
+
+        new_ds['import_playbook'] = items[0].strip()

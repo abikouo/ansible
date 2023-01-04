@@ -4,24 +4,19 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
+from collections.abc import MutableMapping, MutableSet, MutableSequence
+from pathlib import Path
+
 from ansible import constants as C
 from ansible.release import __version__ as ansible_version
-from ansible.errors import AnsibleError, AnsibleAssertionError
+from ansible.errors import AnsibleError, AnsibleParserError, AnsiblePluginNotFound
 from ansible.module_utils.six import string_types
 from ansible.module_utils._text import to_native
-from ansible.module_utils.common._collections_compat import MutableMapping, MutableSet, MutableSequence
 from ansible.parsing.plugin_docs import read_docstring
 from ansible.parsing.yaml.loader import AnsibleLoader
 from ansible.utils.display import Display
 
 display = Display()
-
-
-# modules that are ok that they do not have documentation strings
-REJECTLIST = {
-    'MODULE': frozenset(('async_wrapper',)),
-    'CACHE': frozenset(('base',)),
-}
 
 
 def merge_fragment(target, source):
@@ -36,7 +31,7 @@ def merge_fragment(target, source):
             elif isinstance(target[key], MutableSequence):
                 value = sorted(frozenset(value + target[key]))
             else:
-                raise Exception("Attempt to extend a documentation fragement, invalid type for %s" % key)
+                raise Exception("Attempt to extend a documentation fragment, invalid type for %s" % key)
         target[key] = value
 
 
@@ -88,6 +83,13 @@ def _process_versions_and_dates(fragment, is_module, return_docs, callback):
             if isinstance(return_value.get('contains'), MutableMapping):
                 process_return_values(return_value['contains'])
 
+    def process_attributes(attributes):
+        for attribute in attributes.values():
+            if not isinstance(attribute, MutableMapping):
+                continue
+            if 'version_added' in attribute:
+                callback(attribute, 'version_added', 'version_added_collection')
+
     if not fragment:
         return
 
@@ -101,6 +103,8 @@ def _process_versions_and_dates(fragment, is_module, return_docs, callback):
         process_deprecation(fragment['deprecated'], top_level=True)
     if isinstance(fragment.get('options'), MutableMapping):
         process_options(fragment['options'])
+    if isinstance(fragment.get('attributes'), MutableMapping):
+        process_attributes(fragment['attributes'])
 
 
 def add_collection_to_versions_and_dates(fragment, collection_name, is_module, return_docs=False):
@@ -159,10 +163,8 @@ def add_fragments(doc, filename, fragment_loader, is_module=False):
 
         fragment = AnsibleLoader(fragment_yaml, file_name=filename).get_single_data()
 
-        real_collection_name = 'ansible.builtin'
-        real_fragment_name = getattr(fragment_class, '_load_name')
-        if real_fragment_name.startswith('ansible_collections.'):
-            real_collection_name = '.'.join(real_fragment_name.split('.')[1:3])
+        real_fragment_name = getattr(fragment_class, 'ansible_name')
+        real_collection_name = '.'.join(real_fragment_name.split('.')[0:2]) if '.' in real_fragment_name else ''
         add_collection_to_versions_and_dates(fragment, real_collection_name, is_module=is_module)
 
         if 'notes' in fragment:
@@ -179,17 +181,19 @@ def add_fragments(doc, filename, fragment_loader, is_module=False):
                     doc['seealso'] = []
                 doc['seealso'].extend(seealso)
 
-        if 'options' not in fragment:
-            raise Exception("missing options in fragment (%s), possibly misformatted?: %s" % (fragment_name, filename))
+        if 'options' not in fragment and 'attributes' not in fragment:
+            raise Exception("missing options or attributes in fragment (%s), possibly misformatted?: %s" % (fragment_name, filename))
 
         # ensure options themselves are directly merged
-        if 'options' in doc:
-            try:
-                merge_fragment(doc['options'], fragment.pop('options'))
-            except Exception as e:
-                raise AnsibleError("%s options (%s) of unknown type: %s" % (to_native(e), fragment_name, filename))
-        else:
-            doc['options'] = fragment.pop('options')
+        for doc_key in ['options', 'attributes']:
+            if doc_key in fragment:
+                if doc_key in doc:
+                    try:
+                        merge_fragment(doc[doc_key], fragment.pop(doc_key))
+                    except Exception as e:
+                        raise AnsibleError("%s %s (%s) of unknown type: %s" % (to_native(e), doc_key, fragment_name, filename))
+                else:
+                    doc[doc_key] = fragment.pop(doc_key)
 
         # merge rest of the sections
         try:
@@ -201,10 +205,19 @@ def add_fragments(doc, filename, fragment_loader, is_module=False):
         raise AnsibleError('unknown doc_fragment(s) in file {0}: {1}'.format(filename, to_native(', '.join(unknown_fragments))))
 
 
-def get_docstring(filename, fragment_loader, verbose=False, ignore_errors=False, collection_name=None, is_module=False):
+def get_docstring(filename, fragment_loader, verbose=False, ignore_errors=False, collection_name=None, is_module=None, plugin_type=None):
     """
     DOCUMENTATION can be extended using documentation fragments loaded by the PluginLoader from the doc_fragments plugins.
     """
+
+    if is_module is None:
+        if plugin_type is None:
+            is_module = False
+        else:
+            is_module = (plugin_type == 'module')
+    else:
+        # TODO deprecate is_module argument, now that we have 'type'
+        pass
 
     data = read_docstring(filename, verbose=verbose, ignore_errors=ignore_errors)
 
@@ -256,3 +269,83 @@ def get_versioned_doclink(path):
         return '{0}{1}/{2}'.format(base_url, doc_version, path)
     except Exception as ex:
         return '(unable to create versioned doc link for path {0}: {1})'.format(path, to_native(ex))
+
+
+def _find_adjacent(path, plugin, extensions):
+
+    adjacent = Path(path)
+
+    plugin_base_name = plugin.split('.')[-1]
+    if adjacent.stem != plugin_base_name:
+        # this should only affect filters/tests
+        adjacent = adjacent.with_name(plugin_base_name)
+
+    paths = []
+    for ext in extensions:
+        candidate = adjacent.with_suffix(ext)
+        if candidate == adjacent:
+            # we're looking for an adjacent file, skip this since it's identical
+            continue
+        if candidate.exists():
+            paths.append(to_native(candidate))
+
+    return paths
+
+
+def find_plugin_docfile(plugin, plugin_type, loader):
+    '''  if the plugin lives in a non-python file (eg, win_X.ps1), require the corresponding 'sidecar' file for docs '''
+
+    context = loader.find_plugin_with_context(plugin, ignore_deprecated=False, check_aliases=True)
+    if (not context or not context.resolved) and plugin_type in ('filter', 'test'):
+        # should only happen for filters/test
+        plugin_obj, context = loader.get_with_context(plugin)
+
+    if not context or not context.resolved:
+        raise AnsiblePluginNotFound('%s was not found' % (plugin), plugin_load_context=context)
+
+    docfile = Path(context.plugin_resolved_path)
+    if docfile.suffix not in C.DOC_EXTENSIONS:
+        # only look for adjacent if plugin file does not support documents
+        filenames = _find_adjacent(docfile, plugin, C.DOC_EXTENSIONS)
+        filename = filenames[0] if filenames else None
+    else:
+        filename = to_native(docfile)
+
+    if filename is None:
+        raise AnsibleError('%s cannot contain DOCUMENTATION nor does it have a companion documentation file' % (plugin))
+
+    return filename, context.plugin_resolved_collection
+
+
+def get_plugin_docs(plugin, plugin_type, loader, fragment_loader, verbose):
+
+    docs = []
+
+    # find plugin doc file, if it doesn't exist this will throw error, we let it through
+    # can raise exception and short circuit when 'not found'
+    filename, collection_name = find_plugin_docfile(plugin, plugin_type, loader)
+
+    try:
+        docs = get_docstring(filename, fragment_loader, verbose=verbose, collection_name=collection_name, plugin_type=plugin_type)
+    except Exception as e:
+        raise AnsibleParserError('%s did not contain a DOCUMENTATION attribute (%s)' % (plugin, filename), orig_exc=e)
+
+    # no good? try adjacent
+    if not docs[0]:
+        for newfile in _find_adjacent(filename, plugin, C.DOC_EXTENSIONS):
+            try:
+                docs = get_docstring(newfile, fragment_loader, verbose=verbose, collection_name=collection_name, plugin_type=plugin_type)
+                filename = newfile
+                if docs[0] is not None:
+                    break
+            except Exception as e:
+                raise AnsibleParserError('Adjacent file %s did not contain a DOCUMENTATION attribute (%s)' % (plugin, filename), orig_exc=e)
+
+    # add extra data to docs[0] (aka 'DOCUMENTATION')
+    if docs[0] is None:
+        raise AnsibleParserError('No documentation available for %s (%s)' % (plugin, filename))
+    else:
+        docs[0]['filename'] = filename
+        docs[0]['collection'] = collection_name
+
+    return docs

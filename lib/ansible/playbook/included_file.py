@@ -23,6 +23,7 @@ import os
 
 from ansible import constants as C
 from ansible.errors import AnsibleError
+from ansible.executor.task_executor import remove_omit
 from ansible.module_utils._text import to_text
 from ansible.playbook.handler import Handler
 from ansible.playbook.task_include import TaskInclude
@@ -42,6 +43,7 @@ class IncludedFile:
         self._task = task
         self._hosts = []
         self._is_role = is_role
+        self._results = []
 
     def add_host(self, host):
         if host not in self._hosts:
@@ -70,6 +72,9 @@ class IncludedFile:
             original_task = res._task
 
             if original_task.action in C._ACTION_ALL_INCLUDES:
+                if original_task.action in C._ACTION_INCLUDE:
+                    display.deprecated('"include" is deprecated, use include_tasks/import_tasks/import_playbook instead', "2.16")
+
                 if original_task.loop:
                     if 'results' not in res._result:
                         continue
@@ -115,8 +120,6 @@ class IncludedFile:
 
                     if original_task.action in C._ACTION_ALL_INCLUDE_TASKS:
                         include_file = None
-                        if original_task.static:
-                            continue
 
                         if original_task._parent:
                             # handle relative includes by walking up the list of parent include
@@ -187,8 +190,12 @@ class IncludedFile:
                         new_task._role_name = role_name
                         for from_arg in new_task.FROM_ARGS:
                             if from_arg in include_args:
-                                from_key = from_arg.replace('_from', '')
+                                from_key = from_arg.removesuffix('_from')
                                 new_task._from_files[from_key] = templar.template(include_args.pop(from_arg))
+
+                        omit_token = task_vars.get('omit')
+                        if omit_token:
+                            new_task._from_files = remove_omit(new_task._from_files, omit_token)
 
                         inc_file = IncludedFile(role_name, include_args, special_vars, new_task, is_role=True)
 
@@ -206,6 +213,7 @@ class IncludedFile:
 
                         try:
                             inc_file.add_host(original_host)
+                            inc_file._results.append(res)
                         except ValueError:
                             # The host already exists for this include, advance forward, this is a new include
                             idx += pos + 1

@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright:  Ansible Project
@@ -19,9 +18,7 @@ version_added: '2.4'
 options:
   file:
     description:
-      - The name of the imported file is specified directly without any other option.
-      - Unlike M(ansible.builtin.import_tasks), most keywords, including loop, with_items, and conditionals, apply to this statement.
-      - The do until loop is not supported on M(ansible.builtin.include_tasks).
+      - Specifies the name of the file that lists tasks to add to the current playbook.
     type: str
     version_added: '2.7'
   apply:
@@ -32,10 +29,21 @@ options:
   free-form:
     description:
       - |
-        Supplying a file name via free-form C(- include_tasks: file.yml) of a file to be included is the equivalent
-        of specifying an argument of I(file).
-notes:
-  - This is a core feature of the Ansible, rather than a module, and cannot be overridden like a module.
+        Specifies the name of the imported file directly without any other option C(- include_tasks: file.yml).
+      - Is the equivalent of specifying an argument for the I(file) parameter.
+      - Most keywords, including loop, with_items, and conditionals, apply to this statement unlike M(ansible.builtin.import_tasks).
+      - The do-until loop is not supported.
+extends_documentation_fragment:
+    - action_common_attributes
+    - action_common_attributes.conn
+    - action_common_attributes.flow
+    - action_core
+    - action_core.include
+attributes:
+    check_mode:
+        support: none
+    diff_mode:
+        support: none
 seealso:
 - module: ansible.builtin.import_playbook
 - module: ansible.builtin.import_role
@@ -48,26 +56,27 @@ seealso:
 EXAMPLES = r'''
 - hosts: all
   tasks:
-    - debug:
+    - ansible.builtin.debug:
         msg: task1
 
     - name: Include task list in play
-      include_tasks: stuff.yaml
+      ansible.builtin.include_tasks:
+        file: stuff.yaml
 
-    - debug:
+    - ansible.builtin.debug:
         msg: task10
 
 - hosts: all
   tasks:
-    - debug:
+    - ansible.builtin.debug:
         msg: task1
 
     - name: Include task list in play only if the condition is true
-      include_tasks: "{{ hostvar }}.yaml"
+      ansible.builtin.include_tasks: "{{ hostvar }}.yaml"
       when: hostvar is defined
 
 - name: Apply tags to tasks within included file
-  include_tasks:
+  ansible.builtin.include_tasks:
     file: install.yml
     apply:
       tags:
@@ -76,7 +85,7 @@ EXAMPLES = r'''
     - always
 
 - name: Apply tags to tasks within included file when using free-form
-  include_tasks: install.yml
+  ansible.builtin.include_tasks: install.yml
   args:
     apply:
       tags:

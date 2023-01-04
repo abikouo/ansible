@@ -39,10 +39,10 @@ class RoleMetadata(Base, CollectionSearch):
     within each Role (meta/main.yml).
     '''
 
-    _allow_duplicates = FieldAttribute(isa='bool', default=False)
-    _dependencies = FieldAttribute(isa='list', default=list)
-    _galaxy_info = FieldAttribute(isa='GalaxyInfo')
-    _argument_specs = FieldAttribute(isa='dict', default=dict)
+    allow_duplicates = FieldAttribute(isa='bool', default=False)
+    dependencies = FieldAttribute(isa='list', default=list)
+    galaxy_info = FieldAttribute(isa='GalaxyInfo')
+    argument_specs = FieldAttribute(isa='dict', default=dict)
 
     def __init__(self, owner=None):
         self._owner = owner
@@ -72,6 +72,7 @@ class RoleMetadata(Base, CollectionSearch):
                 raise AnsibleParserError("Expected role dependencies to be a list.", obj=self._ds)
 
             for role_def in ds:
+                # FIXME: consolidate with ansible-galaxy to keep this in sync
                 if isinstance(role_def, string_types) or 'role' in role_def or 'name' in role_def:
                     roles.append(role_def)
                     continue

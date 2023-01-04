@@ -69,3 +69,4 @@ You can also keep a collection adjacent to the current playbook, under a ``colle
 
 
 See :ref:`collection_structure` for details on the collection directory structure.
+

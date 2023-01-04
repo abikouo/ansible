@@ -26,7 +26,7 @@ from ansible.module_utils.six import string_types
 
 class Handler(Task):
 
-    _listen = FieldAttribute(isa='list', default=list, listof=string_types, static=True)
+    listen = FieldAttribute(isa='list', default=list, listof=string_types, static=True)
 
     def __init__(self, block=None, role=None, task_include=None):
         self.notified_hosts = []
@@ -49,6 +49,9 @@ class Handler(Task):
             self.notified_hosts.append(host)
             return True
         return False
+
+    def remove_host(self, host):
+        self.notified_hosts = [h for h in self.notified_hosts if h != host]
 
     def is_host_notified(self, host):
         return host in self.notified_hosts

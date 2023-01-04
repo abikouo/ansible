@@ -6,6 +6,7 @@ from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
 import socket
+import sys
 
 from ansible.module_utils.six import StringIO
 from ansible.module_utils.six.moves.http_cookiejar import Cookie
@@ -13,7 +14,7 @@ from ansible.module_utils.six.moves.http_client import HTTPMessage
 from ansible.module_utils.urls import fetch_url, urllib_error, ConnectionError, NoSSLError, httplib
 
 import pytest
-from mock import MagicMock
+from units.compat.mock import MagicMock
 
 
 class AnsibleModuleExit(Exception):
@@ -67,7 +68,8 @@ def test_fetch_url(open_url_mock, fake_ansible_module):
     open_url_mock.assert_called_once_with('http://ansible.com/', client_cert=None, client_key=None, cookies=kwargs['cookies'], data=None,
                                           follow_redirects='urllib2', force=False, force_basic_auth='', headers=None,
                                           http_agent='ansible-httpget', last_mod_time=None, method=None, timeout=10, url_password='', url_username='',
-                                          use_proxy=True, validate_certs=True, use_gssapi=False, unix_socket=None, ca_path=None)
+                                          use_proxy=True, validate_certs=True, use_gssapi=False, unix_socket=None, ca_path=None, unredirected_headers=None,
+                                          decompress=True, ciphers=None, use_netrc=True)
 
 
 def test_fetch_url_params(open_url_mock, fake_ansible_module):
@@ -89,7 +91,8 @@ def test_fetch_url_params(open_url_mock, fake_ansible_module):
     open_url_mock.assert_called_once_with('http://ansible.com/', client_cert='client.pem', client_key='client.key', cookies=kwargs['cookies'], data=None,
                                           follow_redirects='all', force=False, force_basic_auth=True, headers=None,
                                           http_agent='ansible-test', last_mod_time=None, method=None, timeout=10, url_password='passwd', url_username='user',
-                                          use_proxy=True, validate_certs=False, use_gssapi=False, unix_socket=None, ca_path=None)
+                                          use_proxy=True, validate_certs=False, use_gssapi=False, unix_socket=None, ca_path=None, unredirected_headers=None,
+                                          decompress=True, ciphers=None, use_netrc=True)
 
 
 def test_fetch_url_cookies(mocker, fake_ansible_module):
@@ -133,9 +136,16 @@ def test_fetch_url_cookies(mocker, fake_ansible_module):
     r, info = fetch_url(fake_ansible_module, 'http://ansible.com/')
 
     assert info['cookies'] == {'Baz': 'qux', 'Foo': 'bar'}
-    # Python sorts cookies in order of most specific (ie. longest) path first
-    # items with the same path are reversed from response order
-    assert info['cookies_string'] == 'Baz=qux; Foo=bar'
+
+    if sys.version_info < (3, 11):
+        # Python sorts cookies in order of most specific (ie. longest) path first
+        # items with the same path are reversed from response order
+        assert info['cookies_string'] == 'Baz=qux; Foo=bar'
+    else:
+        # Python 3.11 and later preserve the Set-Cookie order.
+        # See: https://github.com/python/cpython/pull/22745/
+        assert info['cookies_string'] == 'Foo=bar; Baz=qux'
+
     # The key here has a `-` as opposed to what we see in the `uri` module that converts to `_`
     # Note: this is response order, which differs from cookies_string
     assert info['set-cookie'] == 'Foo=bar, Baz=qux'

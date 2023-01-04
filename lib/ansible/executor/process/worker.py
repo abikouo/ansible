@@ -25,19 +25,8 @@ import traceback
 
 from jinja2.exceptions import TemplateNotFound
 
-HAS_PYCRYPTO_ATFORK = False
-try:
-    from Crypto.Random import atfork
-    HAS_PYCRYPTO_ATFORK = True
-except Exception:
-    # We only need to call atfork if pycrypto is used because it will need to
-    # reinitialize its RNG.  Since old paramiko could be using pycrypto, we
-    # need to take charge of calling it.
-    pass
-
 from ansible.errors import AnsibleConnectionFailure
 from ansible.executor.task_executor import TaskExecutor
-from ansible.executor.task_result import TaskResult
 from ansible.module_utils._text import to_text
 from ansible.utils.display import Display
 from ansible.utils.multiprocessing import context as multiprocessing_context
@@ -47,7 +36,7 @@ __all__ = ['WorkerProcess']
 display = Display()
 
 
-class WorkerProcess(multiprocessing_context.Process):
+class WorkerProcess(multiprocessing_context.Process):  # type: ignore[name-defined]
     '''
     The worker thread class, which uses TaskExecutor to run tasks
     read from a job queue and pushes results into a results queue
@@ -72,34 +61,37 @@ class WorkerProcess(multiprocessing_context.Process):
         self._loader._tempfiles = set()
 
     def _save_stdin(self):
-        self._new_stdin = os.devnull
+        self._new_stdin = None
         try:
             if sys.stdin.isatty() and sys.stdin.fileno() is not None:
                 try:
                     self._new_stdin = os.fdopen(os.dup(sys.stdin.fileno()))
                 except OSError:
                     # couldn't dupe stdin, most likely because it's
-                    # not a valid file descriptor, so we just rely on
-                    # using the one that was passed in
+                    # not a valid file descriptor
                     pass
         except (AttributeError, ValueError):
-            # couldn't get stdin's fileno, so we just carry on
+            # couldn't get stdin's fileno
             pass
+
+        if self._new_stdin is None:
+            self._new_stdin = open(os.devnull)
 
     def start(self):
         '''
         multiprocessing.Process replaces the worker's stdin with a new file
-        opened on os.devnull, but we wish to preserve it if it is connected to
-        a terminal. Therefore dup a copy prior to calling the real start(),
+        but we wish to preserve it if it is connected to a terminal.
+        Therefore dup a copy prior to calling the real start(),
         ensuring the descriptor is preserved somewhere in the new child, and
         make sure it is closed in the parent when start() completes.
         '''
 
         self._save_stdin()
-        try:
-            return super(WorkerProcess, self).start()
-        finally:
-            if self._new_stdin != os.devnull:
+        # FUTURE: this lock can be removed once a more generalized pre-fork thread pause is in place
+        with display._lock:
+            try:
+                return super(WorkerProcess, self).start()
+            finally:
                 self._new_stdin.close()
 
     def _hard_exit(self, e):
@@ -137,15 +129,17 @@ class WorkerProcess(multiprocessing_context.Process):
         finally:
             # This is a hack, pure and simple, to work around a potential deadlock
             # in ``multiprocessing.Process`` when flushing stdout/stderr during process
-            # shutdown. We have various ``Display`` calls that may fire from a fork
-            # so we cannot do this early. Instead, this happens at the very end
-            # to avoid that deadlock, by simply side stepping it. This should not be
-            # treated as a long term fix. Additionally this behavior only presents itself
-            # on Python3. Python2 does not exhibit the deadlock behavior.
-            # TODO: Evaluate overhauling ``Display`` to not write directly to stdout
-            # and evaluate migrating away from the ``fork`` multiprocessing start method.
-            if sys.version_info[0] >= 3:
-                sys.stdout = sys.stderr = open(os.devnull, 'w')
+            # shutdown.
+            #
+            # We should no longer have a problem with ``Display``, as it now proxies over
+            # the queue from a fork. However, to avoid any issues with plugins that may
+            # be doing their own printing, this has been kept.
+            #
+            # This happens at the very end to avoid that deadlock, by simply side
+            # stepping it. This should not be treated as a long term fix.
+            #
+            # TODO: Evaluate migrating away from the ``fork`` multiprocessing start method.
+            sys.stdout = sys.stderr = open(os.devnull, 'w')
 
     def _run(self):
         '''
@@ -158,8 +152,8 @@ class WorkerProcess(multiprocessing_context.Process):
         # pr = cProfile.Profile()
         # pr.enable()
 
-        if HAS_PYCRYPTO_ATFORK:
-            atfork()
+        # Set the queue on Display so calls to Display.display are proxied over the queue
+        display.set_queue(self._final_q)
 
         try:
             # execute the task and build a TaskResult from the result

@@ -12,7 +12,7 @@ DOCUMENTATION = """
     description:
         - Run commands or put/fetch on a target via WinRM
         - This plugin allows extra arguments to be passed that are supported by the protocol but not explicitly defined here.
-          They should take the form of variables declared with the following pattern `ansible_winrm_<option>`.
+          They should take the form of variables declared with the following pattern C(ansible_winrm_<option>).
     version_added: "2.0"
     extends_documentation_fragment:
         - connection_pipelining
@@ -25,6 +25,7 @@ DOCUMENTATION = """
             - Address of the windows machine
         default: inventory_hostname
         vars:
+            - name: inventory_hostname
             - name: ansible_host
             - name: ansible_winrm_host
         type: str
@@ -34,6 +35,8 @@ DOCUMENTATION = """
         vars:
             - name: ansible_user
             - name: ansible_winrm_user
+        keyword:
+            - name: remote_user
         type: str
       remote_password:
         description: Authentication password for the C(remote_user). Can be supplied as CLI option.
@@ -52,6 +55,8 @@ DOCUMENTATION = """
           - name: ansible_port
           - name: ansible_winrm_port
         default: 5986
+        keyword:
+            - name: port
         type: integer
       scheme:
         description:
@@ -74,6 +79,7 @@ DOCUMENTATION = """
            - If None (the default) the plugin will try to automatically guess the correct list
            - The choices available depend on your version of pywinrm
         type: list
+        elements: string
         vars:
           - name: ansible_winrm_transport
       kerberos_command:
@@ -92,6 +98,21 @@ DOCUMENTATION = """
         vars:
           - name: ansible_winrm_kinit_args
         version_added: '2.11'
+      kinit_env_vars:
+        description:
+        - A list of environment variables to pass through to C(kinit) when getting the Kerberos authentication ticket.
+        - By default no environment variables are passed through and C(kinit) is run with a blank slate.
+        - The environment variable C(KRB5CCNAME) cannot be specified here as it's used to store the temp Kerberos
+          ticket used by WinRM.
+        type: list
+        elements: str
+        default: []
+        ini:
+        - section: winrm
+          key: kinit_env_vars
+        vars:
+          - name: ansible_winrm_kinit_env_vars
+        version_added: '2.12'
       kerberos_mode:
         description:
             - kerberos usage mode.
@@ -107,8 +128,29 @@ DOCUMENTATION = """
         type: str
       connection_timeout:
         description:
-            - Sets the operation and read timeout settings for the WinRM
+            - Despite its name, sets both the 'operation' and 'read' timeout settings for the WinRM
               connection.
+            - The operation timeout belongs to the WS-Man layer and runs on the winRM-service on the
+              managed windows host.
+            - The read timeout belongs to the underlying python Request call (http-layer) and runs
+              on the ansible controller.
+            - The operation timeout sets the WS-Man 'Operation timeout' that runs on the managed
+              windows host. The operation timeout specifies how long a command will run on the
+              winRM-service before it sends the message 'WinRMOperationTimeoutError' back to the
+              client. The client (silently) ignores this message and starts a new instance of the
+              operation timeout, waiting for the command to finish (long running commands).
+            - The read timeout sets the client HTTP-request timeout and specifies how long the
+              client (ansible controller) will wait for data from the server to come back over
+              the HTTP-connection (timeout for waiting for in-between messages from the server).
+              When this timer expires, an exception will be thrown and the ansible connection
+              will be terminated with the error message 'Read timed out'
+            - To avoid the above exception to be thrown, the read timeout will be set to 10
+              seconds higher than the WS-Man operation timeout, thus make the connection more
+              robust on networks with long latency and/or many hops between server and client
+              network wise.
+            - Setting the difference bewteen the operation and the read timeout to 10 seconds
+              alligns it to the defaults used in the winrm-module and the PSRP-module which also
+              uses 10 seconds (30 seconds for read timeout and 20 seconds for operation timeout)
             - Corresponds to the C(operation_timeout_sec) and
               C(read_timeout_sec) args in pywinrm so avoid setting these vars
               with this one.
@@ -129,6 +171,9 @@ import tempfile
 import shlex
 import subprocess
 
+from inspect import getfullargspec
+from urllib.parse import urlunsplit
+
 HAVE_KERBEROS = False
 try:
     import kerberos
@@ -141,20 +186,13 @@ from ansible.errors import AnsibleError, AnsibleConnectionFailure
 from ansible.errors import AnsibleFileNotFound
 from ansible.module_utils.json_utils import _filter_non_json_lines
 from ansible.module_utils.parsing.convert_bool import boolean
-from ansible.module_utils.six.moves.urllib.parse import urlunsplit
 from ansible.module_utils._text import to_bytes, to_native, to_text
-from ansible.module_utils.six import binary_type, PY3
+from ansible.module_utils.six import binary_type
 from ansible.plugins.connection import ConnectionBase
 from ansible.plugins.shell.powershell import _parse_clixml
 from ansible.utils.hashing import secure_hash
 from ansible.utils.display import Display
 
-# getargspec is deprecated in favour of getfullargspec in Python 3 but
-# getfullargspec is not available in Python 2
-if PY3:
-    from inspect import getfullargspec as getargspec
-else:
-    from inspect import getargspec
 
 try:
     import winrm
@@ -162,6 +200,7 @@ try:
     from winrm.protocol import Protocol
     import requests.exceptions
     HAS_WINRM = True
+    WINRM_IMPORT_ERR = None
 except ImportError as e:
     HAS_WINRM = False
     WINRM_IMPORT_ERR = e
@@ -169,6 +208,7 @@ except ImportError as e:
 try:
     import xmltodict
     HAS_XMLTODICT = True
+    XMLTODICT_IMPORT_ERR = None
 except ImportError as e:
     HAS_XMLTODICT = False
     XMLTODICT_IMPORT_ERR = e
@@ -180,7 +220,7 @@ try:
     # we can only use pexpect for kerb auth if echo is a valid kwarg
     # https://github.com/ansible/ansible/issues/43462
     if hasattr(pexpect, 'spawn'):
-        argspec = getargspec(pexpect.spawn.__init__)
+        argspec = getfullargspec(pexpect.spawn.__init__)
         if 'echo' in argspec.args:
             HAS_PEXPECT = True
 except ImportError as e:
@@ -277,13 +317,13 @@ class Connection(ConnectionBase):
             self._kerb_managed = False
 
         # arg names we're going passing directly
-        internal_kwarg_mask = set(['self', 'endpoint', 'transport', 'username', 'password', 'scheme', 'path', 'kinit_mode', 'kinit_cmd'])
+        internal_kwarg_mask = {'self', 'endpoint', 'transport', 'username', 'password', 'scheme', 'path', 'kinit_mode', 'kinit_cmd'}
 
         self._winrm_kwargs = dict(username=self._winrm_user, password=self._winrm_pass)
-        argspec = getargspec(Protocol.__init__)
+        argspec = getfullargspec(Protocol.__init__)
         supported_winrm_args = set(argspec.args)
         supported_winrm_args.update(internal_kwarg_mask)
-        passed_winrm_args = set([v.replace('ansible_winrm_', '') for v in self.get_option('_extras')])
+        passed_winrm_args = {v.replace('ansible_winrm_', '') for v in self.get_option('_extras')}
         unsupported_args = passed_winrm_args.difference(supported_winrm_args)
 
         # warn for kwargs unsupported by the installed version of pywinrm
@@ -304,7 +344,13 @@ class Connection(ConnectionBase):
         display.vvvvv("creating Kerberos CC at %s" % self._kerb_ccache.name)
         krb5ccname = "FILE:%s" % self._kerb_ccache.name
         os.environ["KRB5CCNAME"] = krb5ccname
-        krb5env = dict(KRB5CCNAME=krb5ccname)
+        krb5env = dict(PATH=os.environ["PATH"], KRB5CCNAME=krb5ccname)
+
+        # Add any explicit environment vars into the krb5env block
+        kinit_env_vars = self.get_option('kinit_env_vars')
+        for var in kinit_env_vars:
+            if var not in krb5env and var in os.environ:
+                krb5env[var] = os.environ[var]
 
         # Stores various flags to call with kinit, these could be explicit args set by 'ansible_winrm_kinit_args' OR
         # '-f' if kerberos delegation is requested (ansible_winrm_kerberos_delegation).
@@ -418,7 +464,7 @@ class Connection(ConnectionBase):
                 winrm_kwargs = self._winrm_kwargs.copy()
                 if self._winrm_connection_timeout:
                     winrm_kwargs['operation_timeout_sec'] = self._winrm_connection_timeout
-                    winrm_kwargs['read_timeout_sec'] = self._winrm_connection_timeout + 1
+                    winrm_kwargs['read_timeout_sec'] = self._winrm_connection_timeout + 10
                 protocol = Protocol(endpoint, transport=transport, **winrm_kwargs)
 
                 # open the shell from connect so we know we're able to talk to the server

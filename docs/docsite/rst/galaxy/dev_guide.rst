@@ -54,7 +54,7 @@ The above will create the following directory structure in the current working d
        vars/
            main.yml
 
-If you want to create a repository for the role the repository root should be `role_name`.
+If you want to create a repository for the role, the repository root should be `role_name`.
 
 Force
 -----
@@ -242,5 +242,5 @@ Provide the ID of the integration to be disabled. You can find the ID by using t
     All about ansible roles
   `Mailing List <https://groups.google.com/group/ansible-project>`_
     Questions? Help? Ideas?  Stop by the list on Google Groups
-  `irc.freenode.net <http://irc.freenode.net>`_
-    #ansible IRC chat channel
+  :ref:`communication_irc`
+    How to join Ansible chat channels

@@ -32,7 +32,7 @@ from ansible.errors import AnsibleError
 from ansible.executor.play_iterator import PlayIterator
 from ansible.executor.stats import AggregateStats
 from ansible.executor.task_result import TaskResult
-from ansible.module_utils.six import PY3, string_types
+from ansible.module_utils.six import string_types
 from ansible.module_utils._text import to_text, to_native
 from ansible.playbook.play_context import PlayContext
 from ansible.playbook.task import Task
@@ -58,10 +58,15 @@ class CallbackSend:
         self.kwargs = kwargs
 
 
+class DisplaySend:
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
 class FinalQueue(multiprocessing.queues.Queue):
     def __init__(self, *args, **kwargs):
-        if PY3:
-            kwargs['ctx'] = multiprocessing_context
+        kwargs['ctx'] = multiprocessing_context
         super(FinalQueue, self).__init__(*args, **kwargs)
 
     def send_callback(self, method_name, *args, **kwargs):
@@ -79,6 +84,17 @@ class FinalQueue(multiprocessing.queues.Queue):
             tr,
             block=False
         )
+
+    def send_display(self, *args, **kwargs):
+        self.put(
+            DisplaySend(*args, **kwargs),
+            block=False
+        )
+
+
+class AnsibleEndPlay(Exception):
+    def __init__(self, result):
+        self.result = result
 
 
 class TaskQueueManager:
@@ -301,6 +317,8 @@ class TaskQueueManager:
         for host_name in self._failed_hosts.keys():
             host = self._inventory.get_host(host_name)
             iterator.mark_host_failed(host)
+        for host_name in self._unreachable_hosts.keys():
+            iterator._play._removed_hosts.append(host_name)
 
         self.clear_failed_hosts()
 
@@ -321,6 +339,9 @@ class TaskQueueManager:
         for host_name in iterator.get_failed_hosts():
             self._failed_hosts[host_name] = True
 
+        if iterator.end_play:
+            raise AnsibleEndPlay(play_return)
+
         return play_return
 
     def cleanup(self):
@@ -328,22 +349,10 @@ class TaskQueueManager:
         self.terminate()
         self._final_q.close()
         self._cleanup_processes()
-
-        # A bug exists in Python 2.6 that causes an exception to be raised during
-        # interpreter shutdown. This is only an issue in our CI testing but we
-        # hit it frequently enough to add a small sleep to avoid the issue.
-        # This can be removed once we have split controller available in CI.
-        #
-        # Further information:
-        #     Issue: https://bugs.python.org/issue4106
-        #     Fix:   https://hg.python.org/cpython/rev/d316315a8781
-        #
-        try:
-            if (2, 6) == (sys.version_info[0:2]):
-                time.sleep(0.0001)
-        except (IndexError, AttributeError):
-            # In case there is an issue getting the version info, don't raise an Exception
-            pass
+        # We no longer flush on every write in ``Display.display``
+        # just ensure we've flushed during cleanup
+        sys.stdout.flush()
+        sys.stderr.flush()
 
     def _cleanup_processes(self):
         if hasattr(self, '_workers'):
@@ -409,7 +418,7 @@ class TaskQueueManager:
             for possible in [method_name, 'v2_on_any']:
                 gotit = getattr(callback_plugin, possible, None)
                 if gotit is None:
-                    gotit = getattr(callback_plugin, possible.replace('v2_', ''), None)
+                    gotit = getattr(callback_plugin, possible.removeprefix('v2_'), None)
                 if gotit is not None:
                     methods.append(gotit)
 

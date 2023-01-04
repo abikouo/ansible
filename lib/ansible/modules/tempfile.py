@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2016, Krzysztof Magosa <krzysztof@magosa.pl>
@@ -41,6 +40,14 @@ options:
       - Suffix of file/directory name created by module.
     type: str
     default: ""
+extends_documentation_fragment: action_common_attributes
+attributes:
+    check_mode:
+        support: none
+    diff_mode:
+        support: none
+    platform:
+        platforms: posix
 seealso:
 - module: ansible.builtin.file
 - module: ansible.windows.win_tempfile
@@ -101,7 +108,7 @@ def main():
                 dir=module.params['path'],
             )
             close(handle)
-        elif module.params['state'] == 'directory':
+        else:
             path = mkdtemp(
                 prefix=module.params['prefix'],
                 suffix=module.params['suffix'],

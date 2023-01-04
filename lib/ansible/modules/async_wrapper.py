@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>, and others
@@ -64,7 +63,7 @@ def daemonize_self():
     try:
         pid = os.fork()
         if pid > 0:
-            # TODO: print 'async_wrapper_pid': pid, but careful as it will polute expectec output.
+            # TODO: print 'async_wrapper_pid': pid, but careful as it will pollute expected output.
             end()
     except OSError:
         e = sys.exc_info()[1]
@@ -137,7 +136,6 @@ def _make_temp_dir(path):
 
 def jwrite(info):
 
-    global job_path
     jobfile = job_path + ".tmp"
     tjob = open(jobfile, "w")
     try:
@@ -343,8 +341,7 @@ def main():
                 _run_module(cmd, jid)
                 notice("Module complete (%s)" % os.getpid())
 
-    except Exception:
-        e = sys.exc_info()[1]
+    except Exception as e:
         notice("error: %s" % e)
         end({"failed": True, "msg": "FATAL ERROR: %s" % e}, "async_wrapper exited prematurely")
 

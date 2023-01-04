@@ -4,8 +4,8 @@ set -eux
 
 ANSIBLE_ROLES_PATH=../ ansible-playbook template.yml -i ../../inventory -v "$@"
 
-# Test for #35571
-ansible testhost -i testhost, -m debug -a 'msg={{ hostvars["localhost"] }}' -e "vars1={{ undef }}" -e "vars2={{ vars1 }}"
+# Test for https://github.com/ansible/ansible/pull/35571
+ansible testhost -i testhost, -m debug -a 'msg={{ hostvars["localhost"] }}' -e "vars1={{ undef() }}" -e "vars2={{ vars1 }}"
 
 # Test for https://github.com/ansible/ansible/issues/27262
 ansible-playbook ansible_managed.yml -c  ansible_managed.cfg -i ../../inventory -v "$@"
@@ -34,3 +34,21 @@ ansible-playbook 6653.yml -v "$@"
 
 # https://github.com/ansible/ansible/issues/72262
 ansible-playbook 72262.yml -v "$@"
+
+# ensure unsafe is preserved, even with extra newlines
+ansible-playbook unsafe.yml -v "$@"
+
+# ensure Jinja2 overrides from a template are used
+ansible-playbook in_template_overrides.yml -v "$@"
+
+ansible-playbook lazy_eval.yml -i ../../inventory -v "$@"
+
+ansible-playbook undefined_in_import.yml -i ../../inventory -v "$@"
+
+# ensure diff null configs work #76493
+for badcfg in "badnull1" "badnull2" "badnull3"
+do
+	[ -f "./${badcfg}.cfg" ]
+	ANSIBLE_CONFIG="./${badcfg}.cfg" ansible-config dump --only-changed
+done
+

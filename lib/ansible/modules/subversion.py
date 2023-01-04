@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>
@@ -17,9 +16,6 @@ description:
 version_added: "0.7"
 author:
 - Dane Summers (@dsummersl) <njharman@gmail.com>
-notes:
-   - This module does not handle externals.
-   - Supports C(check_mode).
 options:
   repo:
     description:
@@ -40,8 +36,8 @@ options:
     aliases: [ rev, version ]
   force:
     description:
-      - If C(yes), modified files will be discarded. If C(no), module will fail if it encounters modified files.
-        Prior to 1.9 the default was C(yes).
+      - If C(true), modified files will be discarded. If C(false), module will fail if it encounters modified files.
+        Prior to 1.9 the default was C(true).
     type: bool
     default: "no"
   in_place:
@@ -69,35 +65,45 @@ options:
     version_added: "1.4"
   checkout:
     description:
-     - If C(no), do not check out the repository if it does not exist locally.
+     - If C(false), do not check out the repository if it does not exist locally.
     type: bool
     default: "yes"
     version_added: "2.3"
   update:
     description:
-     - If C(no), do not retrieve new revisions from the origin repository.
+     - If C(false), do not retrieve new revisions from the origin repository.
     type: bool
     default: "yes"
     version_added: "2.3"
   export:
     description:
-      - If C(yes), do export instead of checkout/update.
+      - If C(true), do export instead of checkout/update.
     type: bool
     default: "no"
     version_added: "1.6"
   switch:
     description:
-      - If C(no), do not call svn switch before update.
+      - If C(false), do not call svn switch before update.
     default: "yes"
     version_added: "2.0"
     type: bool
   validate_certs:
     description:
-      - If C(no), passes the C(--trust-server-cert) flag to svn.
-      - If C(yes), does not pass the flag.
+      - If C(false), passes the C(--trust-server-cert) flag to svn.
+      - If C(true), does not pass the flag.
     default: "no"
     version_added: "2.11"
     type: bool
+extends_documentation_fragment: action_common_attributes
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: none
+    platform:
+        platforms: posix
+notes:
+   - This module does not handle externals.
 
 requirements:
     - subversion (the command line tool with C(svn) entrypoint)
@@ -128,12 +134,19 @@ RETURN = r'''#'''
 import os
 import re
 
-from distutils.version import LooseVersion
-
 from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.common.locale import get_best_parsable_locale
+from ansible.module_utils.compat.version import LooseVersion
 
 
 class Subversion(object):
+
+    # Example text matched by the regexp:
+    #  Révision : 1889134
+    #  版本: 1889134
+    #  Revision: 1889134
+    REVISION_RE = r'^\w+\s?:\s+\d+$'
+
     def __init__(self, module, dest, repo, revision, username, password, svn_path, validate_certs):
         self.module = module
         self.dest = dest
@@ -228,14 +241,28 @@ class Subversion(object):
     def get_revision(self):
         '''Revision and URL of subversion working directory.'''
         text = '\n'.join(self._exec(["info", self.dest]))
-        rev = re.search(r'^Revision:.*$', text, re.MULTILINE).group(0)
-        url = re.search(r'^URL:.*$', text, re.MULTILINE).group(0)
+        rev = re.search(self.REVISION_RE, text, re.MULTILINE)
+        if rev:
+            rev = rev.group(0)
+        else:
+            rev = 'Unable to get revision'
+
+        url = re.search(r'^URL\s?:.*$', text, re.MULTILINE)
+        if url:
+            url = url.group(0)
+        else:
+            url = 'Unable to get URL'
+
         return rev, url
 
     def get_remote_revision(self):
         '''Revision and URL of subversion working directory.'''
         text = '\n'.join(self._exec(["info", self.repo]))
-        rev = re.search(r'^Revision:.*$', text, re.MULTILINE).group(0)
+        rev = re.search(self.REVISION_RE, text, re.MULTILINE)
+        if rev:
+            rev = rev.group(0)
+        else:
+            rev = 'Unable to get remote revision'
         return rev
 
     def has_local_mods(self):
@@ -250,7 +277,11 @@ class Subversion(object):
     def needs_update(self):
         curr, url = self.get_revision()
         out2 = '\n'.join(self._exec(["info", "-r", self.revision, self.dest]))
-        head = re.search(r'^Revision:.*$', out2, re.MULTILINE).group(0)
+        head = re.search(self.REVISION_RE, out2, re.MULTILINE)
+        if head:
+            head = head.group(0)
+        else:
+            head = 'Unable to get revision'
         rev1 = int(curr.split(':')[1].strip())
         rev2 = int(head.split(':')[1].strip())
         change = False
@@ -295,7 +326,8 @@ def main():
 
     # We screenscrape a huge amount of svn commands so use C locale anytime we
     # call run_command()
-    module.run_command_environ_update = dict(LANG='C', LC_MESSAGES='C')
+    locale = get_best_parsable_locale(module)
+    module.run_command_environ_update = dict(LANG=locale, LC_MESSAGES=locale)
 
     if not dest and (checkout or update or export):
         module.fail_json(msg="the destination directory must be specified unless checkout=no, update=no, and export=no")

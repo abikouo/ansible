@@ -11,7 +11,7 @@ import os
 
 from ansible.errors import AnsibleError, AnsibleAction, _AnsibleActionDone, AnsibleActionFail
 from ansible.module_utils._text import to_native
-from ansible.module_utils.common.collections import Mapping
+from ansible.module_utils.common.collections import Mapping, MutableMapping
 from ansible.module_utils.parsing.convert_bool import boolean
 from ansible.module_utils.six import text_type
 from ansible.plugins.action import ActionBase
@@ -61,7 +61,7 @@ class ActionModule(ActionBase):
                         'body must be mapping, cannot be type %s' % body.__class__.__name__
                     )
                 for field, value in body.items():
-                    if isinstance(value, text_type):
+                    if not isinstance(value, MutableMapping):
                         continue
                     content = value.get('content')
                     filename = value.get('filename')
@@ -82,8 +82,7 @@ class ActionModule(ActionBase):
                     self._fixup_perms2((self._connection._shell.tmpdir, tmp_src))
                 kwargs['body'] = body
 
-            new_module_args = self._task.args.copy()
-            new_module_args.update(kwargs)
+            new_module_args = self._task.args | kwargs
 
             # call with ansible.legacy prefix to prevent collections collisions while allowing local override
             result.update(self._execute_module('ansible.legacy.uri', module_args=new_module_args, task_vars=task_vars, wrap_async=self._task.async_val))

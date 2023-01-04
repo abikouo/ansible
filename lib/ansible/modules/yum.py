@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Red Hat, Inc
@@ -42,17 +41,19 @@ options:
     aliases: [ pkg ]
     type: list
     elements: str
+    default: []
   exclude:
     description:
       - Package name(s) to exclude when state=present, or latest
     type: list
     elements: str
+    default: []
     version_added: "2.0"
   list:
     description:
-      - "Package name to run the equivalent of yum list --show-duplicates <package> against. In addition to listing packages,
+      - "Package name to run the equivalent of C(yum list --show-duplicates <package>) against. In addition to listing packages,
         use can also list the following: C(installed), C(updates), C(available) and C(repos)."
-      - This parameter is mutually exclusive with C(name).
+      - This parameter is mutually exclusive with I(name).
     type: str
   state:
     description:
@@ -73,6 +74,7 @@ options:
         separated string
     type: list
     elements: str
+    default: []
     version_added: "0.9"
   disablerepo:
     description:
@@ -83,6 +85,7 @@ options:
         separated string
     type: list
     elements: str
+    default: []
     version_added: "0.9"
   conf_file:
     description:
@@ -98,7 +101,8 @@ options:
     version_added: "1.2"
   skip_broken:
     description:
-      - Skip packages with broken dependencies(devsolve) and are causing problems.
+      - Skip all unavailable packages or packages with broken dependencies
+        without raising an error. Equivalent to passing the --skip-broken option.
     type: bool
     default: "no"
     version_added: "2.3"
@@ -112,13 +116,19 @@ options:
     version_added: "1.9"
   validate_certs:
     description:
-      - This only applies if using a https url as the source of the rpm. e.g. for localinstall. If set to C(no), the SSL certificates will not be validated.
-      - This should only set to C(no) used on personally controlled sites using self-signed certificates as it avoids verifying the source site.
-      - Prior to 2.1 the code worked as if this was set to C(yes).
+      - This only applies if using a https url as the source of the rpm. e.g. for localinstall. If set to C(false), the SSL certificates will not be validated.
+      - This should only set to C(false) used on personally controlled sites using self-signed certificates as it avoids verifying the source site.
+      - Prior to 2.1 the code worked as if this was set to C(true).
     type: bool
     default: "yes"
     version_added: "2.1"
-
+  sslverify:
+    description:
+      - Disables SSL validation of the repository server for this transaction.
+      - This should be set to C(false) if one of the configured repositories is using an untrusted or self-signed certificate.
+    type: bool
+    default: "yes"
+    version_added: "2.13"
   update_only:
     description:
       - When using latest, only update installed packages. Do not install packages.
@@ -136,13 +146,13 @@ options:
     version_added: "2.3"
   security:
     description:
-      - If set to C(yes), and C(state=latest) then only installs updates that have been marked security related.
+      - If set to C(true), and C(state=latest) then only installs updates that have been marked security related.
     type: bool
     default: "no"
     version_added: "2.4"
   bugfix:
     description:
-      - If set to C(yes), and C(state=latest) then only installs updates that have been marked bugfix related.
+      - If set to C(true), and C(state=latest) then only installs updates that have been marked bugfix related.
     default: "no"
     type: bool
     version_added: "2.6"
@@ -165,6 +175,7 @@ options:
         The enabled plugin will not persist beyond the transaction.
     type: list
     elements: str
+    default: []
     version_added: "2.5"
   disable_plugin:
     description:
@@ -172,6 +183,7 @@ options:
         The disabled plugins will not persist beyond the transaction.
     type: list
     elements: str
+    default: []
     version_added: "2.5"
   releasever:
     description:
@@ -181,7 +193,7 @@ options:
     version_added: "2.7"
   autoremove:
     description:
-      - If C(yes), removes all "leaf" packages from the system that were originally
+      - If C(true), removes all "leaf" packages from the system that were originally
         installed as dependencies of user-installed packages but which are no longer
         required by any such package. Should be used alone or when state is I(absent)
       - "NOTE: This feature requires yum >= 3.4.3 (RHEL/CentOS 7+)"
@@ -236,9 +248,32 @@ options:
     version_added: "1.5"
     default: "yes"
     type: bool
+  cacheonly:
+    description:
+      - Tells yum to run entirely from system cache; does not download or update metadata.
+    default: "no"
+    type: bool
+    version_added: "2.12"
+extends_documentation_fragment:
+- action_common_attributes
+- action_common_attributes.flow
+attributes:
+    action:
+        details: In the case of yum, it has 2 action plugins that use it under the hood, M(ansible.builtin.yum) and M(ansible.builtin.package).
+        support: partial
+    async:
+        support: none
+    bypass_host_loop:
+        support: none
+    check_mode:
+        support: full
+    diff_mode:
+        support: full
+    platform:
+        platforms: rhel
 notes:
-  - When used with a `loop:` each package will be processed individually,
-    it is much more efficient to pass the list directly to the `name` option.
+  - When used with a C(loop:) each package will be processed individually,
+    it is much more efficient to pass the list directly to the I(name) option.
   - In versions prior to 1.9.2 this module installed and removed each package
     given to the yum module separately. This caused problems when packages
     specified by filename or url had to be installed or removed together. In
@@ -274,17 +309,17 @@ author:
 
 EXAMPLES = '''
 - name: Install the latest version of Apache
-  yum:
+  ansible.builtin.yum:
     name: httpd
     state: latest
 
 - name: Install Apache >= 2.4
-  yum:
+  ansible.builtin.yum:
     name: httpd>=2.4
     state: present
 
 - name: Install a list of packages (suitable replacement for 2.11 loop deprecation warning)
-  yum:
+  ansible.builtin.yum:
     name:
       - nginx
       - postgresql
@@ -292,7 +327,7 @@ EXAMPLES = '''
     state: present
 
 - name: Install a list of packages with a list variable
-  yum:
+  ansible.builtin.yum:
     name: "{{ packages }}"
   vars:
     packages:
@@ -300,69 +335,69 @@ EXAMPLES = '''
     - httpd-tools
 
 - name: Remove the Apache package
-  yum:
+  ansible.builtin.yum:
     name: httpd
     state: absent
 
 - name: Install the latest version of Apache from the testing repo
-  yum:
+  ansible.builtin.yum:
     name: httpd
     enablerepo: testing
     state: present
 
 - name: Install one specific version of Apache
-  yum:
+  ansible.builtin.yum:
     name: httpd-2.2.29-1.4.amzn1
     state: present
 
 - name: Upgrade all packages
-  yum:
+  ansible.builtin.yum:
     name: '*'
     state: latest
 
 - name: Upgrade all packages, excluding kernel & foo related packages
-  yum:
+  ansible.builtin.yum:
     name: '*'
     state: latest
     exclude: kernel*,foo*
 
 - name: Install the nginx rpm from a remote repo
-  yum:
+  ansible.builtin.yum:
     name: http://nginx.org/packages/centos/6/noarch/RPMS/nginx-release-centos-6-0.el6.ngx.noarch.rpm
     state: present
 
 - name: Install nginx rpm from a local file
-  yum:
+  ansible.builtin.yum:
     name: /usr/local/src/nginx-release-centos-6-0.el6.ngx.noarch.rpm
     state: present
 
 - name: Install the 'Development tools' package group
-  yum:
+  ansible.builtin.yum:
     name: "@Development tools"
     state: present
 
 - name: Install the 'Gnome desktop' environment group
-  yum:
+  ansible.builtin.yum:
     name: "@^gnome-desktop-environment"
     state: present
 
 - name: List ansible packages and register result to print with debug later
-  yum:
+  ansible.builtin.yum:
     list: ansible
   register: result
 
 - name: Install package with multiple repos enabled
-  yum:
+  ansible.builtin.yum:
     name: sos
     enablerepo: "epel,ol7_latest"
 
 - name: Install package with multiple repos disabled
-  yum:
+  ansible.builtin.yum:
     name: sos
     disablerepo: "epel,ol7_latest"
 
 - name: Download the nginx package but do not install it
-  yum:
+  ansible.builtin.yum:
     name:
       - nginx
     state: latest
@@ -370,6 +405,7 @@ EXAMPLES = '''
 '''
 
 from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.common.locale import get_best_parsable_locale
 from ansible.module_utils.common.respawn import has_respawned, respawn_module
 from ansible.module_utils._text import to_native, to_text
 from ansible.module_utils.urls import fetch_url
@@ -526,6 +562,11 @@ class YumModule(YumDnf):
             if self.disable_excludes:
                 self._yum_base.conf.disable_excludes = self.disable_excludes
 
+            # setting conf.sslverify allows retrieving the repo's metadata
+            # without validating the certificate, but that does not allow
+            # package installation from a bad-ssl repo.
+            self._yum_base.conf.sslverify = self.sslverify
+
             # A sideeffect of accessing conf is that the configuration is
             # loaded and plugins are discovered
             self.yum_base.conf
@@ -592,11 +633,14 @@ class YumModule(YumDnf):
                 rpmbin = self.module.get_bin_path('rpm', required=True)
 
             cmd = [rpmbin, '-q', '--qf', qf, pkgspec]
+            if '*' in pkgspec:
+                cmd.append('-a')
             if self.installroot != '/':
                 cmd.extend(['--root', self.installroot])
             # rpm localizes messages and we're screen scraping so make sure we use
-            # the C locale
-            lang_env = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C')
+            # an appropriate locale
+            locale = get_best_parsable_locale(self.module)
+            lang_env = dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale)
             rc, out, err = self.module.run_command(cmd, environ_update=lang_env)
             if rc != 0 and 'is not installed' not in out:
                 self.module.fail_json(msg='Error from rpm: %s: %s' % (cmd, err))
@@ -709,24 +753,24 @@ class YumModule(YumDnf):
                     # If a repo with `repo_gpgcheck=1` is added and the repo GPG
                     # key was never accepted, querying this repo will throw an
                     # error: 'repomd.xml signature could not be verified'. In that
-                    # situation we need to run `yum -y makecache` which will accept
+                    # situation we need to run `yum -y makecache fast` which will accept
                     # the key and try again.
                     if 'repomd.xml signature could not be verified' in to_native(e):
                         if self.releasever:
-                            self.module.run_command(self.yum_basecmd + ['makecache'] + ['--releasever=%s' % self.releasever])
+                            self.module.run_command(self.yum_basecmd + ['makecache', 'fast', '--releasever=%s' % self.releasever])
                         else:
-                            self.module.run_command(self.yum_basecmd + ['makecache'])
+                            self.module.run_command(self.yum_basecmd + ['makecache', 'fast'])
                         pkgs = self.yum_base.returnPackagesByDep(req_spec) + \
                             self.yum_base.returnInstalledPackagesByDep(req_spec)
                     else:
                         raise
                 if not pkgs:
-                    e, m, _ = self.yum_base.pkgSack.matchPackageNames([req_spec])
-                    pkgs.extend(e)
-                    pkgs.extend(m)
-                    e, m, _ = self.yum_base.rpmdb.matchPackageNames([req_spec])
-                    pkgs.extend(e)
-                    pkgs.extend(m)
+                    exact_matches, glob_matches = self.yum_base.pkgSack.matchPackageNames([req_spec])[0:2]
+                    pkgs.extend(exact_matches)
+                    pkgs.extend(glob_matches)
+                    exact_matches, glob_matches = self.yum_base.rpmdb.matchPackageNames([req_spec])[0:2]
+                    pkgs.extend(exact_matches)
+                    pkgs.extend(glob_matches)
             except Exception as e:
                 self.module.fail_json(msg="Failure talking to yum: %s" % to_native(e))
 
@@ -749,7 +793,7 @@ class YumModule(YumDnf):
             rc2, out2, err2 = self.module.run_command(cmd)
             if rc == 0 and rc2 == 0:
                 out += out2
-                pkgs = set([p for p in out.split('\n') if p.strip()])
+                pkgs = {p for p in out.split('\n') if p.strip()}
                 if not pkgs:
                     pkgs = self.is_installed(repoq, req_spec, qf=qf)
                 return pkgs
@@ -928,12 +972,18 @@ class YumModule(YumDnf):
         if self.releasever:
             cmd.extend(['--releasever=%s' % self.releasever])
 
+        # setting sslverify using --setopt is required as conf.sslverify only
+        # affects the metadata retrieval.
+        if not self.sslverify:
+            cmd.extend(['--setopt', 'sslverify=0'])
+
         if self.module.check_mode:
             self.module.exit_json(changed=True, results=res['results'], changes=dict(installed=pkgs))
         else:
             res['changes'] = dict(installed=pkgs)
 
-        lang_env = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C')
+        locale = get_best_parsable_locale(self.module)
+        lang_env = dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale)
         rc, out, err = self.module.run_command(cmd, environ_update=lang_env)
 
         if rc == 1:
@@ -1008,7 +1058,7 @@ class YumModule(YumDnf):
                 # most common case is the pkg is already installed
                 envra = self.local_envra(package)
                 if envra is None:
-                    self.module.fail_json(msg="Failed to get nevra information from RPM package: %s" % spec)
+                    self.module.fail_json(msg="Failed to get envra information from RPM package: %s" % spec)
                 installed_pkgs = self.is_installed(repoq, envra)
                 if installed_pkgs:
                     res['results'].append('%s providing %s is already installed' % (installed_pkgs[0], package))
@@ -1221,37 +1271,28 @@ class YumModule(YumDnf):
 
     @staticmethod
     def parse_check_update(check_update_output):
-        updates = {}
-        obsoletes = {}
+        # preprocess string and filter out empty lines so the regex below works
+        out = '\n'.join((l for l in check_update_output.splitlines() if l))
 
-        # remove incorrect new lines in longer columns in output from yum check-update
-        # yum line wrapping can move the repo to the next line
-        #
-        # Meant to filter out sets of lines like:
+        # Remove incorrect new lines in longer columns in output from yum check-update
+        # yum line wrapping can move the repo to the next line:
         #  some_looooooooooooooooooooooooooooooooooooong_package_name   1:1.2.3-1.el7
         #                                                                    some-repo-label
-        #
-        # But it also needs to avoid catching lines like:
-        # Loading mirror speeds from cached hostfile
-        #
-        # ceph.x86_64                               1:11.2.0-0.el7                    ceph
+        out = re.sub(r'\n\W+(.*)', r' \1', out)
 
-        # preprocess string and filter out empty lines so the regex below works
-        out = re.sub(r'\n[^\w]\W+(.*)', r' \1', check_update_output)
-
-        available_updates = out.split('\n')
-
-        # build update dictionary
-        for line in available_updates:
+        updates = {}
+        obsoletes = {}
+        for line in out.split('\n'):
             line = line.split()
-            # ignore irrelevant lines
-            # '*' in line matches lines like mirror lists:
-            #      * base: mirror.corbina.net
-            # len(line) != 3 or 6 could be junk or a continuation
-            # len(line) = 6 is package obsoletes
-            #
-            # FIXME: what is  the '.' not in line  conditional for?
-
+            """
+            Ignore irrelevant lines:
+              - '*' in line matches lines like mirror lists: "* base: mirror.corbina.net"
+              - len(line) != 3 or 6 could be strings like:
+                  "This system is not registered with an entitlement server..."
+              - len(line) = 6 is package obsoletes
+              - checking for '.' in line[0] (package name) likely ensures that it is of format:
+                  "package_name.arch" (coreutils.x86_64)
+            """
             if '*' in line or len(line) not in [3, 6] or '.' not in line[0]:
                 continue
 
@@ -1287,7 +1328,7 @@ class YumModule(YumDnf):
         updates = {}
         obsoletes = {}
         update_all = False
-        cmd = None
+        cmd = self.yum_basecmd[:]
 
         # determine if we're doing an update all
         if '*' in items:
@@ -1306,7 +1347,7 @@ class YumModule(YumDnf):
             self.module.fail_json(**res)
 
         if update_all:
-            cmd = self.yum_basecmd + ['update']
+            cmd.append('update')
             will_update = set(updates.keys())
             will_update_from_other_package = dict()
         else:
@@ -1332,7 +1373,7 @@ class YumModule(YumDnf):
                     envra = self.local_envra(spec)
 
                     if envra is None:
-                        self.module.fail_json(msg="Failed to get nevra information from RPM package: %s" % spec)
+                        self.module.fail_json(msg="Failed to get envra information from RPM package: %s" % spec)
 
                     # local rpm files can't be updated
                     if self.is_installed(repoq, envra):
@@ -1349,7 +1390,7 @@ class YumModule(YumDnf):
                     envra = self.local_envra(package)
 
                     if envra is None:
-                        self.module.fail_json(msg="Failed to get nevra information from RPM package: %s" % spec)
+                        self.module.fail_json(msg="Failed to get envra information from RPM package: %s" % spec)
 
                     # local rpm files can't be updated
                     if self.is_installed(repoq, envra):
@@ -1488,13 +1529,14 @@ class YumModule(YumDnf):
             cmd.extend(['--releasever=%s' % self.releasever])
 
         # run commands
-        if cmd:     # update all
+        if update_all:
             rc, out, err = self.module.run_command(cmd)
             res['changed'] = True
         elif self.update_only:
             if pkgs['update']:
-                cmd = self.yum_basecmd + ['update'] + pkgs['update']
-                lang_env = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C')
+                cmd += ['update'] + pkgs['update']
+                locale = get_best_parsable_locale(self.module)
+                lang_env = dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale)
                 rc, out, err = self.module.run_command(cmd, environ_update=lang_env)
                 out_lower = out.strip().lower()
                 if not out_lower.endswith("no packages marked for update") and \
@@ -1503,8 +1545,9 @@ class YumModule(YumDnf):
             else:
                 rc, out, err = [0, '', '']
         elif pkgs['install'] or will_update and not self.update_only:
-            cmd = self.yum_basecmd + ['install'] + pkgs['install'] + pkgs['update']
-            lang_env = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C')
+            cmd += ['install'] + pkgs['install'] + pkgs['update']
+            locale = get_best_parsable_locale(self.module)
+            lang_env = dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale)
             rc, out, err = self.module.run_command(cmd, environ_update=lang_env)
             out_lower = out.strip().lower()
             if not out_lower.endswith("no packages marked for update") and \
@@ -1557,6 +1600,9 @@ class YumModule(YumDnf):
 
         if self.disable_excludes:
             self.yum_basecmd.extend(['--disableexcludes=%s' % self.disable_excludes])
+
+        if self.cacheonly:
+            self.yum_basecmd.extend(['--cacheonly'])
 
         if self.download_only:
             self.yum_basecmd.extend(['--downloadonly'])

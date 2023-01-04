@@ -33,7 +33,7 @@ when a term comes up on the mailing list.
         Name used starting with 2.11. The installable package (RPM/Python/Deb package) generated from the `ansible/ansible repository <https://github.com/ansible/ansible>`_. Contains the command-line tools and the code for basic features and functions, such as copying module code to managed nodes. The ``ansible-core`` package includes a few modules and plugins and allows you to add others by installing collections.
 
     Ansible Galaxy
-        An `online resource <galaxy.ansible.com>`_ for finding and sharing Ansible community content. Also, the command-line utility that lets users install individual Ansible Collections, for example`` ansible-galaxy install community.crypto``.
+        An `online distribution server <galaxy.ansible.com>`_ for finding and sharing Ansible community content, sometimes referred to as community Galaxy. Also, the command-line utility that lets users install individual Ansible Collections, for example ``ansible-galaxy collection install community.crypto``.
 
     Async
         Refers to a task that is configured to run in the background rather
@@ -68,10 +68,10 @@ when a term comes up on the mailing list.
         The second part of a Fully Qualified Collection Name. The collection name divides the collection namespace and usually reflects the function of the collection content. For example, the ``cisco`` namespace might contain ``cisco.ios``, ``cisco.aci``, and ``cisco.nxos``, with content for managing the different network devices maintained by Cisco.
 
     community.general (collection)
-        A special collection managed by the Ansible Community Team containing all the modules and plugins which shipped in Ansible 2.9 that do ont have their own dedicated Collection. See `community.general <https://galaxy.ansible.com/community/general>`_` on Galaxy.
+        A special collection managed by the Ansible Community Team containing all the modules and plugins which shipped in Ansible 2.9 that do not have their own dedicated Collection. See `community.general <https://galaxy.ansible.com/community/general>`_ on Galaxy.
 
     community.network (collection)
-        Similar to ``community.general``, focusing on network content. `community.network <https://galaxy.ansible.com/community/network>`_` on Galaxy.
+        Similar to ``community.general``, focusing on network content. `community.network <https://galaxy.ansible.com/community/network>`_ on Galaxy.
 
     Connection Plugin
         By default, Ansible talks to remote machines through pluggable
@@ -108,6 +108,9 @@ when a term comes up on the mailing list.
         modules that support it. You can combine it with ``--check`` to get a
         good 'dry run'.  File diffs are normally in unified diff format.
 
+    Distribution server
+        A server, such as Ansible Galaxy or Red Hat Automation Hub where you can distribute your collections and allow others to access these collections. See :ref:`distributing_collections` for a list of distribution server types. Some Ansible features are only available on certain distribution servers.
+
     Executor
         A core software component of Ansible that is the power behind
         :command:`/usr/bin/ansible` directly -- and corresponds to the
@@ -123,12 +126,12 @@ when a term comes up on the mailing list.
         executing the internal :ref:`setup module <setup_module>` on the remote nodes.  You
         never have to call the setup module explicitly, it just runs, but it
         can be disabled to save time if it is not needed or you can tell
-        ansible to collect only a subset of the full facts via the
+        ansible to collect only a subset of the full facts through the
         ``gather_subset:`` option. For the convenience of users who are
         switching from other configuration management systems, the fact module
         will also pull in facts from the :program:`ohai` and :program:`facter`
         tools if they are installed.  These are fact libraries from Chef and
-        Puppet, respectively. (These may also be disabled via
+        Puppet, respectively. (These may also be disabled through
         ``gather_subset:``)
 
     Filter Plugin
@@ -181,7 +184,7 @@ when a term comes up on the mailing list.
     Handlers
         Handlers are just like regular tasks in an Ansible
         :term:`playbook <playbooks>` (see :term:`Tasks`) but are only run if
-        the Task contains a ``notify`` directive and also indicates that it
+        the Task contains a ``notify`` keyword and also indicates that it
         changed something.  For example, if a config file is changed, then the
         task referencing the config file templating operation may notify
         a service restart handler.  This means services can be bounced only if
@@ -199,7 +202,7 @@ when a term comes up on the mailing list.
         Each :term:`Play <plays>` in Ansible maps a series of :term:`tasks` (which define the role,
         purpose, or orders of a system) to a set of systems.
 
-        This ``hosts:`` directive in each play is often called the hosts specifier.
+        This ``hosts:`` keyword in each play is often called the hosts specifier.
 
         It may select one system, many systems, one or more groups, or even
         some hosts that are in one group and explicitly not in another.
@@ -230,7 +233,7 @@ when a term comes up on the mailing list.
     Inventory
         A file (by default, Ansible uses a simple INI format) that describes
         :term:`Hosts <Host>` and :term:`Groups <Group>` in Ansible.  Inventory
-        can also be provided via an :term:`Inventory Script` (sometimes called
+        can also be provided through an :term:`Inventory Script` (sometimes called
         an "External Inventory Script").
 
     Inventory Script
@@ -249,6 +252,11 @@ when a term comes up on the mailing list.
     JSON
         Ansible uses JSON for return data from remote modules.  This allows
         modules to be written in any language, not just Python.
+
+    Keyword
+        The main expressions that make up Ansible, which apply to playbook objects
+        (Play, Block, Role and Task). For example 'vars:' is a keyword that lets
+        you define variables in the scope of the playbook object it is applied to.
 
     Lazy Evaluation
         In general, Ansible evaluates any variables in
@@ -270,16 +278,16 @@ when a term comes up on the mailing list.
         servers to one particular server.
 
     Local Action
-        A local_action directive in a :term:`playbook <playbooks>` targeting
-        remote machines means that the given step will actually occur on the
-        local machine, but that the variable ``{{ ansible_hostname }}`` can be
-        passed in to reference the remote hostname being referred to in that
-        step.  This can be used to trigger, for example, an rsync operation.
+        This keyword is an alias for ``delegate_to: localhost``.
+        Used when you want to redirect an action from the remote to
+        execute on the controller itself.
 
     Local Connection
         By using ``connection: local`` in a :term:`playbook <playbooks>`, or
         passing ``-c local`` to :command:`/usr/bin/ansible`, this indicates
-        that we are managing the local host and not a remote machine.
+        that we are executing a local fork instead of executing on the remote machine.
+        You probably want ``local_action`` or ``delegate_to: localhost`` instead
+        as this ONLY changes the connection and no other context for execution.
 
     Lookup Plugin
         A lookup plugin is a way to get data into Ansible from the outside world.
@@ -305,7 +313,7 @@ when a term comes up on the mailing list.
         :command:`/usr/bin/ansible` or :command:`/usr/bin/ansible-playbook`
         (where multiple tasks use lots of different modules in conjunction).
         Modules can be implemented in any language, including Perl, Bash, or
-        Ruby -- but can leverage some useful communal library code if written
+        Ruby -- but can take advantage of some useful communal library code if written
         in Python.  Modules just have to return :term:`JSON`.  Once modules are
         executed on remote machines, they are removed, so no long running
         daemons are used.  Ansible refers to the collection of available
@@ -381,6 +389,10 @@ when a term comes up on the mailing list.
         git on a crontab and then managing the machine locally, using the
         :term:`local connection` plugin.
 
+    Pulp 3 Galaxy
+        A self-hosted distribution server based on the `GalaxyNG codebase <https://galaxyng.netlify.app/>`_, based on Pulp version 3. Use it to find and share your own curated set of content. You can access your content with the ``ansible-galaxy collection`` command.
+
+
     Push Mode
         Push mode is the default mode of Ansible. In fact, it's not really
         a mode at all -- it's just how Ansible works when you aren't thinking
@@ -447,8 +459,8 @@ when a term comes up on the mailing list.
 
     SSH (Native)
         Native OpenSSH as an Ansible transport is specified with ``-c ssh``
-        (or a config file, or a directive in the :term:`playbook <playbooks>`)
-        and can be useful if wanting to login via Kerberized SSH or using SSH
+        (or a config file, or a keyword in the :term:`playbook <playbooks>`)
+        and can be useful if wanting to login through Kerberized SSH or using SSH
         jump hosts, and so on.  In 1.2.1, ``ssh`` will be used by default if the
         OpenSSH binary on the control machine is sufficiently new.
         Previously, Ansible selected ``paramiko`` as a default.  Using
@@ -469,7 +481,7 @@ when a term comes up on the mailing list.
     Task
         :term:`Playbooks` exist to run tasks.  Tasks combine an :term:`action`
         (a module and its arguments) with a name and optionally some other
-        keywords (like :term:`looping directives <loops>`).   :term:`Handlers`
+        keywords (like :term:`looping keywords <loops>`).   :term:`Handlers`
         are also tasks, but they are a special kind of task that do not run
         unless they are notified by name when a task reports an underlying
         change on a remote system.
@@ -527,5 +539,5 @@ when a term comes up on the mailing list.
        Tips and tricks for playbooks
    `User Mailing List <https://groups.google.com/group/ansible-devel>`_
        Have a question?  Stop by the google group!
-   `irc.freenode.net <http://irc.freenode.net>`_
-       #ansible IRC chat channel
+   :ref:`communication_irc`
+       How to join Ansible chat channels

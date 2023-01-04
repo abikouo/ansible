@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2014, Ruggero Marchei <ruggero.marchei@daemonzone.net>
@@ -36,19 +35,19 @@ options:
               least one of the patterns specified. Multiple patterns can be specified using a list.
             - The pattern is matched against the file base name, excluding the directory.
             - When using regexen, the pattern MUST match the ENTIRE file name, not just parts of it. So
-              if you are looking to match all files ending in .default, you'd need to use '.*\.default'
-              as a regexp and not just '\.default'.
+              if you are looking to match all files ending in .default, you'd need to use C(.*\.default)
+              as a regexp and not just C(\.default).
             - This parameter expects a list, which can be either comma separated or YAML. If any of the
               patterns contain a comma, make sure to put them in a list to avoid splitting the patterns
               in undesirable ways.
-            - Defaults to '*' when C(use_regex=False), or '.*' when C(use_regex=True).
+            - Defaults to C(*) when I(use_regex=False), or C(.*) when I(use_regex=True).
         type: list
         aliases: [ pattern ]
         elements: str
     excludes:
         description:
-            - One or more (shell or regex) patterns, which type is controlled by C(use_regex) option.
-            - Items whose basenames match an C(excludes) pattern are culled from C(patterns) matches.
+            - One or more (shell or regex) patterns, which type is controlled by I(use_regex) option.
+            - Items whose basenames match an I(excludes) pattern are culled from I(patterns) matches.
               Multiple patterns can be specified using a list.
         type: list
         aliases: [ exclude ]
@@ -103,32 +102,41 @@ options:
         default: mtime
     hidden:
         description:
-            - Set this to C(yes) to include hidden files, otherwise they will be ignored.
+            - Set this to C(true) to include hidden files, otherwise they will be ignored.
         type: bool
         default: no
     follow:
         description:
-            - Set this to C(yes) to follow symlinks in path for systems with python 2.6+.
+            - Set this to C(true) to follow symlinks in path for systems with python 2.6+.
         type: bool
         default: no
     get_checksum:
         description:
-            - Set this to C(yes) to retrieve a file's SHA1 checksum.
+            - Set this to C(true) to retrieve a file's SHA1 checksum.
         type: bool
         default: no
     use_regex:
         description:
-            - If C(no), the patterns are file globs (shell).
-            - If C(yes), they are python regexes.
+            - If C(false), the patterns are file globs (shell).
+            - If C(true), they are python regexes.
         type: bool
         default: no
     depth:
         description:
             - Set the maximum number of levels to descend into.
-            - Setting recurse to C(no) will override this value, which is effectively depth 1.
+            - Setting recurse to C(false) will override this value, which is effectively depth 1.
             - Default is unlimited depth.
         type: int
         version_added: "2.6"
+extends_documentation_fragment: action_common_attributes
+attributes:
+    check_mode:
+        details: since this action does not modify the target it just executes normally during check mode
+        support: full
+    diff_mode:
+        support: none
+    platform:
+        platforms: posix
 seealso:
 - module: ansible.windows.win_find
 '''
@@ -136,41 +144,41 @@ seealso:
 
 EXAMPLES = r'''
 - name: Recursively find /tmp files older than 2 days
-  find:
+  ansible.builtin.find:
     paths: /tmp
     age: 2d
     recurse: yes
 
 - name: Recursively find /tmp files older than 4 weeks and equal or greater than 1 megabyte
-  find:
+  ansible.builtin.find:
     paths: /tmp
     age: 4w
     size: 1m
     recurse: yes
 
 - name: Recursively find /var/tmp files with last access time greater than 3600 seconds
-  find:
+  ansible.builtin.find:
     paths: /var/tmp
     age: 3600
     age_stamp: atime
     recurse: yes
 
 - name: Find /var/log files equal or greater than 10 megabytes ending with .old or .log.gz
-  find:
+  ansible.builtin.find:
     paths: /var/log
     patterns: '*.old,*.log.gz'
     size: 10m
 
 # Note that YAML double quotes require escaping backslashes but yaml single quotes do not.
 - name: Find /var/log files equal or greater than 10 megabytes ending with .old or .log.gz via regex
-  find:
+  ansible.builtin.find:
     paths: /var/log
     patterns: "^.*?\\.(?:old|log\\.gz)$"
     size: 10m
     use_regex: yes
 
 - name: Find /var/log all directories, exclude nginx and mysql
-  find:
+  ansible.builtin.find:
     paths: /var/log
     recurse: no
     file_type: directory
@@ -178,14 +186,14 @@ EXAMPLES = r'''
 
 # When using patterns that contain a comma, make sure they are formatted as lists to avoid splitting the pattern
 - name: Use a single pattern that contains a comma formatted as a list
-  find:
+  ansible.builtin.find:
     paths: /var/log
     file_type: file
     use_regex: yes
     patterns: ['^_[0-9]{2,4}_.*.log$']
 
 - name: Use multiple patterns that contain a comma formatted as a YAML list
-  find:
+  ansible.builtin.find:
     paths: /var/log
     file_type: file
     use_regex: yes
@@ -220,6 +228,12 @@ examined:
     returned: success
     type: int
     sample: 34
+skipped_paths:
+    description: skipped paths and reasons they were skipped
+    returned: success
+    type: dict
+    sample: {"/laskdfj": "'/laskdfj' is not a directory"}
+    version_added: '2.12'
 '''
 
 import fnmatch
@@ -277,9 +291,9 @@ def agefilter(st, now, age, timestamp):
     '''filter files older than age'''
     if age is None:
         return True
-    elif age >= 0 and now - st.__getattribute__("st_%s" % timestamp) >= abs(age):
+    elif age >= 0 and now - getattr(st, "st_%s" % timestamp) >= abs(age):
         return True
-    elif age < 0 and now - st.__getattribute__("st_%s" % timestamp) <= abs(age):
+    elif age < 0 and now - getattr(st, "st_%s" % timestamp) <= abs(age):
         return True
     return False
 
@@ -372,6 +386,10 @@ def statinfo(st):
     }
 
 
+def handle_walk_errors(e):
+    raise e
+
+
 def main():
     module = AnsibleModule(
         argument_spec=dict(
@@ -407,6 +425,7 @@ def main():
             params['patterns'] = ['*']
 
     filelist = []
+    skipped = {}
 
     if params['age'] is None:
         age = None
@@ -431,15 +450,16 @@ def main():
             module.fail_json(size=params['size'], msg="failed to process size")
 
     now = time.time()
-    msg = ''
+    msg = 'All paths examined'
     looked = 0
+    has_warnings = False
     for npath in params['paths']:
         npath = os.path.expanduser(os.path.expandvars(npath))
         try:
             if not os.path.isdir(npath):
                 raise Exception("'%s' is not a directory" % to_native(npath))
 
-            for root, dirs, files in os.walk(npath, followlinks=params['follow']):
+            for root, dirs, files in os.walk(npath, onerror=handle_walk_errors, followlinks=params['follow']):
                 looked = looked + len(files) + len(dirs)
                 for fsobj in (files + dirs):
                     fsname = os.path.normpath(os.path.join(root, fsobj))
@@ -448,7 +468,7 @@ def main():
                         depth = int(fsname.count(os.path.sep)) - int(wpath.count(os.path.sep)) + 1
                         if depth > params['depth']:
                             # Empty the list used by os.walk to avoid traversing deeper unnecessarily
-                            del(dirs[:])
+                            del dirs[:]
                             continue
                     if os.path.basename(fsname).startswith('.') and not params['hidden']:
                         continue
@@ -456,7 +476,9 @@ def main():
                     try:
                         st = os.lstat(fsname)
                     except (IOError, OSError) as e:
-                        msg += "Skipped entry '%s' due to this access issue: %s\n" % (fsname, to_text(e))
+                        module.warn("Skipped entry '%s' due to this access issue: %s\n" % (fsname, to_text(e)))
+                        skipped[fsname] = to_text(e)
+                        has_warnings = True
                         continue
 
                     r = {'path': fsname}
@@ -498,12 +520,14 @@ def main():
                 if not params['recurse']:
                     break
         except Exception as e:
-            warn = "Skipped '%s' path due to this access issue: %s\n" % (npath, to_text(e))
-            module.warn(warn)
-            msg += warn
+            skipped[npath] = to_text(e)
+            module.warn("Skipped '%s' path due to this access issue: %s\n" % (to_text(npath), skipped[npath]))
+            has_warnings = True
 
+    if has_warnings:
+        msg = 'Not all paths examined, check warnings for details'
     matched = len(filelist)
-    module.exit_json(files=filelist, changed=False, msg=msg, matched=matched, examined=looked)
+    module.exit_json(files=filelist, changed=False, msg=msg, matched=matched, examined=looked, skipped_paths=skipped)
 
 
 if __name__ == '__main__':

@@ -8,10 +8,6 @@ export ANSIBLE_GATHER_SUBSET=minimal
 export ANSIBLE_HOST_PATTERN_MISMATCH=error
 unset ANSIBLE_COLLECTIONS_ON_ANSIBLE_VERSION_MISMATCH
 
-# FUTURE: just use INVENTORY_PATH as-is once ansible-test sets the right dir
-ipath=../../$(basename "${INVENTORY_PATH:-../../inventory}")
-export INVENTORY_PATH="$ipath"
-
 # ensure we can call collection module
 ansible localhost -m testns.testcoll.testmodule
 
@@ -69,6 +65,16 @@ else
   ansible-playbook -i "${INVENTORY_PATH}" collection_root_user/ansible_collections/testns/testcoll/playbooks/default_collection_playbook.yml "$@"
 fi
 
+# test redirects and warnings for filter redirects
+echo "testing redirect and deprecation display"
+ANSIBLE_DEPRECATION_WARNINGS=yes ansible localhost -m debug -a msg='{{ "data" | testns.testredirect.multi_redirect_filter }}' -vvvvv 2>&1 | tee out.txt
+cat out.txt
+
+test "$(grep out.txt -ce 'deprecation1' -ce 'deprecation2' -ce 'deprecation3')" == 3
+grep out.txt -e 'redirecting (type: filter) testns.testredirect.multi_redirect_filter to testns.testredirect.redirect_filter1'
+grep out.txt -e 'redirecting (type: filter) testns.testredirect.redirect_filter1 to testns.testredirect.redirect_filter2'
+grep out.txt -e 'redirecting (type: filter) testns.testredirect.redirect_filter2 to testns.testcoll.testfilter'
+
 echo "--- validating collections support in playbooks/roles"
 # run test playbooks
 ansible-playbook -i "${INVENTORY_PATH}" -v "${TEST_PLAYBOOK}" "$@"
@@ -104,6 +110,9 @@ ansible-playbook inventory_test.yml -i a.statichost.yml -i redirected.statichost
 # test plugin loader redirect_list
 ansible-playbook test_redirect_list.yml -v "$@"
 
+# test ansiballz cache dupe
+ansible-playbook ansiballz_dupe/test_ansiballz_cache_dupe_shortname.yml -v "$@"
+
 # test adjacent with --playbook-dir
 export ANSIBLE_COLLECTIONS_PATH=''
 ANSIBLE_INVENTORY_ANY_UNPARSED_IS_FAILED=1 ansible-inventory --list --export --playbook-dir=. -v "$@"
@@ -137,3 +146,5 @@ if [[ "$(grep -wc "dynamic_host_a" "$CACHEFILE")" -ne "0" ]]; then
 fi
 
 ./vars_plugin_tests.sh
+
+./test_task_resolved_plugin.sh

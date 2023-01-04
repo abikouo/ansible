@@ -19,14 +19,11 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
-import os
-
 from ansible.errors import AnsibleError, AnsibleParserError
-from ansible.module_utils.six import iteritems, string_types
+from ansible.module_utils.six import string_types
 from ansible.parsing.yaml.objects import AnsibleBaseYAMLObject
-from ansible.playbook.attribute import Attribute, FieldAttribute
+from ansible.playbook.attribute import FieldAttribute
 from ansible.playbook.role.definition import RoleDefinition
-from ansible.playbook.role.requirement import RoleRequirement
 from ansible.module_utils._text import to_native
 
 
@@ -40,8 +37,8 @@ class RoleInclude(RoleDefinition):
     is included for execution in a play.
     """
 
-    _delegate_to = FieldAttribute(isa='string')
-    _delegate_facts = FieldAttribute(isa='bool', default=False)
+    delegate_to = FieldAttribute(isa='string')
+    delegate_facts = FieldAttribute(isa='bool', default=False)
 
     def __init__(self, play=None, role_basedir=None, variable_manager=None, loader=None, collection_list=None):
         super(RoleInclude, self).__init__(play=play, role_basedir=role_basedir, variable_manager=variable_manager,

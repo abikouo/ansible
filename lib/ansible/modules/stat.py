@@ -1,4 +1,3 @@
-#!/usr/bin/python
 
 # Copyright: (c) 2017, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
@@ -48,8 +47,8 @@ options:
     description:
       - Use file magic and return data about the nature of the file. this uses
         the 'file' utility found on most Linux/Unix systems.
-      - This will add both `mime_type` and 'charset' fields to the return, if possible.
-      - In Ansible 2.3 this option changed from 'mime' to 'get_mime' and the default changed to 'Yes'.
+      - This will add both C(mime_type) and C(charset) fields to the return, if possible.
+      - In Ansible 2.3 this option changed from I(mime) to I(get_mime) and the default changed to C(true).
     type: bool
     default: yes
     aliases: [ mime, mime_type, mime-type ]
@@ -61,11 +60,18 @@ options:
     default: yes
     aliases: [ attr, attributes ]
     version_added: "2.3"
+extends_documentation_fragment:
+  -  action_common_attributes
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: none
+    platform:
+        platforms: posix
 seealso:
 - module: ansible.builtin.file
 - module: ansible.windows.win_stat
-notes:
-- Supports C(check_mode).
 author: Bruce Pennypacker (@bpennypacker)
 '''
 
@@ -123,12 +129,12 @@ EXAMPLES = r'''
     msg: "Path exists and is a directory"
   when: p.stat.isdir is defined and p.stat.isdir
 
-- name: Don not do checksum
+- name: Do not calculate the checksum
   ansible.builtin.stat:
     path: /path/to/myhugefile
     get_checksum: no
 
-- name: Use sha256 to calculate checksum
+- name: Use sha256 to calculate the checksum
   ansible.builtin.stat:
     path: /path/to/something
     checksum_algorithm: sha256
@@ -316,26 +322,26 @@ stat:
             sample: 50ba294cdf28c0d5bcde25708df53346825a429f
         pw_name:
             description: User name of owner
-            returned: success, path exists and user can read stats and installed python supports it
+            returned: success, path exists, user can read stats, owner name can be looked up and installed python supports it
             type: str
             sample: httpd
         gr_name:
             description: Group name of owner
-            returned: success, path exists and user can read stats and installed python supports it
+            returned: success, path exists, user can read stats, owner group can be looked up and installed python supports it
             type: str
             sample: www-data
         mimetype:
             description: file magic data or mime-type
             returned: success, path exists and user can read stats and
-                installed python supports it and the `mime` option was true, will
-                return 'unknown' on error.
+                installed python supports it and the I(mime) option was true, will
+                return C(unknown) on error.
             type: str
             sample: application/pdf; charset=binary
         charset:
             description: file character set or encoding
             returned: success, path exists and user can read stats and
-                installed python supports it and the `mime` option was true, will
-                return 'unknown' on error.
+                installed python supports it and the I(mime) option was true, will
+                return C(unknown) on error.
             type: str
             sample: us-ascii
         readable:
@@ -361,6 +367,12 @@ stat:
             returned: success, path exists and user can execute the path
             type: list
             sample: [ immutable, extent ]
+            version_added: 2.3
+        version:
+            description: The version/generation attribute of a file according to the filesystem
+            returned: success, path exists, user can execute the path, lsattr is available and filesystem supports
+            type: str
+            sample: "381700746"
             version_added: 2.3
 '''
 

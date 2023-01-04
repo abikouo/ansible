@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Dane Summers <dsummers@pinedesk.biz>
@@ -57,12 +56,14 @@ options:
   cron_file:
     description:
       - If specified, uses this file instead of an individual user's crontab.
+        The assumption is that this file is exclusively managed by the module,
+        do not use if the file contains multiple entries, NEVER use for /etc/crontab.
       - If this is a relative path, it is interpreted with respect to I(/etc/cron.d).
-      - If it is absolute, it will typically be C(/etc/crontab).
       - Many linux distros expect (and some require) the filename portion to consist solely
         of upper- and lower-case letters, digits, underscores, and hyphens.
-      - To use the I(cron_file) parameter you must specify the I(user) as well.
-    type: str
+      - Using this parameter requires you to specify the I(user) as well, unless I(state) is not I(present).
+      - Either this parameter or I(name) is required
+    type: path
   backup:
     description:
       - If set, create a backup of the crontab before it is modified.
@@ -130,15 +131,23 @@ options:
     type: str
     version_added: "2.1"
 requirements:
-  - cron (or cronie on CentOS)
+  - cron (any 'vixie cron' conformant variant, like cronie)
 author:
   - Dane Summers (@dsummersl)
   - Mike Grozak (@rhaido)
   - Patrick Callahan (@dirtyharrycallahan)
   - Evan Kaufman (@EvanK)
   - Luca Berruti (@lberruti)
-notes:
-  - Supports C(check_mode).
+extends_documentation_fragment:
+    - action_common_attributes
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: full
+    platform:
+        support: full
+        platforms: posix
 '''
 
 EXAMPLES = r'''
@@ -232,6 +241,7 @@ class CronTab(object):
         self.cron_cmd = self.module.get_bin_path('crontab', required=True)
 
         if cron_file:
+
             if os.path.isabs(cron_file):
                 self.cron_file = cron_file
                 self.b_cron_file = to_bytes(cron_file, errors='surrogate_or_strict')
@@ -283,7 +293,10 @@ class CronTab(object):
         if len(self.lines) == 0:
             return True
         else:
-            return False
+            for line in self.lines:
+                if line.strip():
+                    return False
+            return True
 
     def write(self, backup_file=None):
         """
@@ -557,7 +570,7 @@ def main():
             name=dict(type='str', required=True),
             user=dict(type='str'),
             job=dict(type='str', aliases=['value']),
-            cron_file=dict(type='str'),
+            cron_file=dict(type='path'),
             state=dict(type='str', default='present', choices=['present', 'absent']),
             backup=dict(type='bool', default=False),
             minute=dict(type='str', default='*'),
@@ -600,6 +613,10 @@ def main():
     warnings = list()
 
     if cron_file:
+
+        if cron_file == '/etc/crontab':
+            module.fail_json(msg="Will not manage /etc/crontab via cron_file, see documentation.")
+
         cron_file_basename = os.path.basename(cron_file)
         if not re.search(r'^[A-Z0-9_-]+$', cron_file_basename, re.I):
             warnings.append('Filename portion of cron_file ("%s") should consist' % cron_file_basename +
@@ -632,32 +649,20 @@ def main():
     if special_time and platform.system() == 'SunOS':
         module.fail_json(msg="Solaris does not support special_time=... or @reboot")
 
-    if cron_file and do_install:
-        if not user:
+    if do_install:
+        if cron_file and not user:
             module.fail_json(msg="To use cron_file=... parameter you must specify user=... as well")
 
-    if job is None and do_install:
-        module.fail_json(msg="You must specify 'job' to install a new cron job or variable")
+        if job is None:
+            module.fail_json(msg="You must specify 'job' to install a new cron job or variable")
 
-    if (insertafter or insertbefore) and not env and do_install:
-        module.fail_json(msg="Insertafter and insertbefore parameters are valid only with env=yes")
+        if (insertafter or insertbefore) and not env:
+            module.fail_json(msg="Insertafter and insertbefore parameters are valid only with env=yes")
 
     # if requested make a backup before making a change
     if backup and not module.check_mode:
         (backuph, backup_file) = tempfile.mkstemp(prefix='crontab')
         crontab.write(backup_file)
-
-    if crontab.cron_file and not do_install:
-        if module._diff:
-            diff['after'] = ''
-            diff['after_header'] = '/dev/null'
-        else:
-            diff = dict()
-        if module.check_mode:
-            changed = os.path.isfile(crontab.cron_file)
-        else:
-            changed = crontab.remove_job_file()
-        module.exit_json(changed=changed, cron_file=cron_file, state=state, diff=diff)
 
     if env:
         if ' ' in name:
@@ -701,6 +706,17 @@ def main():
             if len(old_job) > 0:
                 crontab.remove_job(name)
                 changed = True
+                if crontab.cron_file and crontab.is_empty():
+                    if module._diff:
+                        diff['after'] = ''
+                        diff['after_header'] = '/dev/null'
+                    else:
+                        diff = dict()
+                    if module.check_mode:
+                        changed = os.path.isfile(crontab.cron_file)
+                    else:
+                        changed = crontab.remove_job_file()
+                    module.exit_json(changed=changed, cron_file=cron_file, state=state, diff=diff)
 
     # no changes to env/job, but existing crontab needs a terminating newline
     if not changed and crontab.n_existing != '':

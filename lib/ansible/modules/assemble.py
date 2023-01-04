@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Stephen Fromm <sfromm@gmail.com>
@@ -37,7 +36,7 @@ options:
     required: true
   backup:
     description:
-    - Create a backup file (if C(yes)), including the timestamp information so
+    - Create a backup file (if C(true)), including the timestamp information so
       you can get the original file back if you somehow clobbered it
       incorrectly.
     type: bool
@@ -49,8 +48,8 @@ options:
     version_added: '1.4'
   remote_src:
     description:
-    - If C(no), it will search for src at originating/master machine.
-    - If C(yes), it will go to the remote/target machine for the src.
+    - If C(false), it will search for src at originating/master machine.
+    - If C(true), it will go to the remote/target machine for the src.
     type: bool
     default: yes
     version_added: '1.4'
@@ -58,8 +57,8 @@ options:
     description:
     - Assemble files only if C(regex) matches the filename.
     - If not set, all files are assembled.
-    - Every "\" (backslash) must be escaped as "\\" to comply to YAML syntax.
-    - Uses L(Python regular expressions,http://docs.python.org/2/library/re.html).
+    - Every C(\) (backslash) must be escaped as C(\\) to comply to YAML syntax.
+    - Uses L(Python regular expressions,https://docs.python.org/3/library/re.html).
     type: str
   ignore_hidden:
     description:
@@ -74,6 +73,24 @@ options:
     - The command is passed securely so shell features like expansion and pipes won't work.
     type: str
     version_added: '2.0'
+attributes:
+    action:
+      support: full
+    async:
+      support: none
+    bypass_host_loop:
+      support: none
+    check_mode:
+      support: none
+    diff_mode:
+      support: full
+    platform:
+      platforms: posix
+    safe_file_operations:
+      support: full
+    vault:
+      support: full
+      version_added: '2.2'
 seealso:
 - module: ansible.builtin.copy
 - module: ansible.builtin.template
@@ -81,8 +98,11 @@ seealso:
 author:
 - Stephen Fromm (@sfromm)
 extends_documentation_fragment:
-- decrypt
-- files
+    - action_common_attributes
+    - action_common_attributes.flow
+    - action_common_attributes.files
+    - decrypt
+    - files
 '''
 
 EXAMPLES = r'''

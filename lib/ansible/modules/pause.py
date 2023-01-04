@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
@@ -38,26 +37,48 @@ options:
     default: 'yes'
     version_added: 2.5
 author: "Tim Bielawa (@tbielawa)"
+extends_documentation_fragment:
+  -  action_common_attributes
+  -  action_common_attributes.conn
+  -  action_common_attributes.flow
+attributes:
+    action:
+        support: full
+    async:
+        support: none
+    become:
+        support: none
+    bypass_host_loop:
+        support: full
+    check_mode:
+        support: full
+    connection:
+        support: none
+    delegation:
+        support: none
+    diff_mode:
+        support: none
+    platform:
+        platforms: all
 notes:
       - Starting in 2.2,  if you specify 0 or negative for minutes or seconds, it will wait for 1 second, previously it would wait indefinitely.
-      - This module is also supported for Windows targets.
       - User input is not captured or echoed, regardless of echo setting, when minutes or seconds is specified.
 '''
 
 EXAMPLES = '''
 - name: Pause for 5 minutes to build app cache
-  pause:
+  ansible.builtin.pause:
     minutes: 5
 
 - name: Pause until you can verify updates to an application were successful
-  pause:
+  ansible.builtin.pause:
 
 - name: A helpful reminder of what to look out for post-update
-  pause:
+  ansible.builtin.pause:
     prompt: "Make sure org.foo.FooOverload exception is not present"
 
 - name: Pause to get some sensitive input
-  pause:
+  ansible.builtin.pause:
     prompt: "Enter a secret"
     echo: no
 '''

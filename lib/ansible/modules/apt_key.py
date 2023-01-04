@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>
@@ -19,15 +18,22 @@ version_added: "1.0"
 short_description: Add or remove an apt key
 description:
     - Add or remove an I(apt) key, optionally downloading it.
+extends_documentation_fragment: action_common_attributes
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: none
+    platform:
+        platforms: debian
 notes:
     - The apt-key command has been deprecated and suggests to 'manage keyring files in trusted.gpg.d instead'. See the Debian wiki for details.
-      This module is kept for backwards compatiblity for systems that still use apt-key as the main way to manage apt repository keys.
+      This module is kept for backwards compatibility for systems that still use apt-key as the main way to manage apt repository keys.
     - As a sanity check, downloaded key id must match the one specified.
     - "Use full fingerprint (40 characters) key ids to avoid key collisions.
       To generate a full-fingerprint imported key: C(apt-key adv --list-public-keys --with-fingerprint --with-colons)."
     - If you specify both the key id and the URL with C(state=present), the task can verify or add the key as needed.
     - Adding a new key requires an apt cache update (e.g. using the M(ansible.builtin.apt) module's update_cache option).
-    - Supports C(check_mode).
 requirements:
     - gpg
 options:
@@ -68,13 +74,25 @@ options:
         default: present
     validate_certs:
         description:
-            - If C(no), SSL certificates for the target url will not be validated. This should only be used
+            - If C(false), SSL certificates for the target url will not be validated. This should only be used
               on personally controlled sites using self-signed certificates.
         type: bool
         default: 'yes'
 '''
 
 EXAMPLES = '''
+- name: One way to avoid apt_key once it is removed from your distro
+  block:
+    - name: somerepo |no apt key
+      ansible.builtin.get_url:
+        url: https://download.example.com/linux/ubuntu/gpg
+        dest: /etc/apt/trusted.gpg.d/somerepo.asc
+
+    - name: somerepo | apt source
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/myrepo.asc] https://download.example.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
 - name: Add an apt key by id from a keyserver
   ansible.builtin.apt_key:
     keyserver: keyserver.ubuntu.com
@@ -99,7 +117,7 @@ EXAMPLES = '''
 # Use armored file since utf-8 string is expected. Must be of "PGP PUBLIC KEY BLOCK" type.
 - name: Add a key from a file on the Ansible server
   ansible.builtin.apt_key:
-    data: "{{ lookup('file', 'apt.asc') }}"
+    data: "{{ lookup('ansible.builtin.file', 'apt.asc') }}"
     state: present
 
 - name: Add an Apt signing key to a specific keyring file
@@ -142,7 +160,7 @@ key_id:
     type: str
     sample: "36A1D7869245C8950F966E92D8576A8BA88D21E9"
 short_id:
-    description: caclulated short key id
+    description: calculated short key id
     returned: always
     type: str
     sample: "A88D21E9"
@@ -153,14 +171,24 @@ import os
 # FIXME: standardize into module_common
 from traceback import format_exc
 
-from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils._text import to_native
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.common.locale import get_best_parsable_locale
 from ansible.module_utils.urls import fetch_url
 
 
 apt_key_bin = None
 gpg_bin = None
-lang_env = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C')
+locale = None
+
+
+def lang_env(module):
+
+    if not hasattr(lang_env, 'result'):
+        locale = get_best_parsable_locale(module)
+        lang_env.result = dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale)
+
+    return lang_env.result
 
 
 def find_needed_binaries(module):
@@ -253,6 +281,8 @@ def all_keys(module, keyring, short_format):
     else:
         cmd = "%s adv --list-public-keys --keyid-format=long" % apt_key_bin
     (rc, out, err) = module.run_command(cmd)
+    if rc != 0:
+        module.fail_json(msg="Unable to list public keys", cmd=cmd, rc=rc, stdout=out, stderr=err)
 
     return parse_output_for_keys(out, short_format)
 
@@ -283,14 +313,16 @@ def download_key(module, url):
 
 def get_key_id_from_file(module, filename, data=None):
 
-    global lang_env
+    native_data = to_native(data)
+    is_armored = native_data.find("-----BEGIN PGP PUBLIC KEY BLOCK-----") >= 0
+
     key = None
 
     cmd = [gpg_bin, '--with-colons', filename]
 
-    (rc, out, err) = module.run_command(cmd, environ_update=lang_env, data=to_native(data))
+    (rc, out, err) = module.run_command(cmd, environ_update=lang_env(module), data=(native_data if is_armored else data), binary_data=not is_armored)
     if rc != 0:
-        module.fail_json(msg="Unable to extract key from '%s'" % ('inline data' if data is None else filename), stdout=out, stderr=err)
+        module.fail_json(msg="Unable to extract key from '%s'" % ('inline data' if data is not None else filename), stdout=out, stderr=err)
 
     keys = parse_output_for_keys(out)
     # assume we only want first key?
@@ -306,27 +338,29 @@ def get_key_id_from_data(module, data):
 
 def import_key(module, keyring, keyserver, key_id):
 
-    global lang_env
     if keyring:
-        cmd = "%s --keyring %s adv --no-tty --keyserver %s --recv %s" % (apt_key_bin, keyring, keyserver, key_id)
+        cmd = "%s --keyring %s adv --no-tty --keyserver %s" % (apt_key_bin, keyring, keyserver)
     else:
-        cmd = "%s adv --no-tty --keyserver %s --recv %s" % (apt_key_bin, keyserver, key_id)
+        cmd = "%s adv --no-tty --keyserver %s" % (apt_key_bin, keyserver)
 
     # check for proxy
     cmd = add_http_proxy(cmd)
 
+    # add recv argument as last one
+    cmd = "%s --recv %s" % (cmd, key_id)
+
     for retry in range(5):
-        (rc, out, err) = module.run_command(cmd, environ_update=lang_env)
+        (rc, out, err) = module.run_command(cmd, environ_update=lang_env(module))
         if rc == 0:
             break
     else:
         # Out of retries
         if rc == 2 and 'not found on keyserver' in out:
             msg = 'Key %s not found on keyserver %s' % (key_id, keyserver)
-            module.fail_json(cmd=cmd, msg=msg)
+            module.fail_json(cmd=cmd, msg=msg, forced_environment=lang_env(module))
         else:
             msg = "Error fetching key %s from keyserver: %s" % (key_id, keyserver)
-            module.fail_json(cmd=cmd, msg=msg, rc=rc, stdout=out, stderr=err)
+            module.fail_json(cmd=cmd, msg=msg, forced_environment=lang_env(module), rc=rc, stdout=out, stderr=err)
     return True
 
 
@@ -336,23 +370,48 @@ def add_key(module, keyfile, keyring, data=None):
             cmd = "%s --keyring %s add -" % (apt_key_bin, keyring)
         else:
             cmd = "%s add -" % apt_key_bin
-        (rc, out, err) = module.run_command(cmd, data=data, check_rc=True, binary_data=True)
+        (rc, out, err) = module.run_command(cmd, data=data, binary_data=True)
+        if rc != 0:
+            module.fail_json(
+                msg="Unable to add a key from binary data",
+                cmd=cmd,
+                rc=rc,
+                stdout=out,
+                stderr=err,
+            )
     else:
         if keyring:
             cmd = "%s --keyring %s add %s" % (apt_key_bin, keyring, keyfile)
         else:
             cmd = "%s add %s" % (apt_key_bin, keyfile)
-        (rc, out, err) = module.run_command(cmd, check_rc=True)
+        (rc, out, err) = module.run_command(cmd)
+        if rc != 0:
+            module.fail_json(
+                msg="Unable to add a key from file %s" % (keyfile),
+                cmd=cmd,
+                rc=rc,
+                keyfile=keyfile,
+                stdout=out,
+                stderr=err,
+            )
     return True
 
 
 def remove_key(module, key_id, keyring):
-    # FIXME: use module.run_command, fail at point of error and don't discard useful stdin/stdout
     if keyring:
         cmd = '%s --keyring %s del %s' % (apt_key_bin, keyring, key_id)
     else:
         cmd = '%s del %s' % (apt_key_bin, key_id)
-    (rc, out, err) = module.run_command(cmd, check_rc=True)
+    (rc, out, err) = module.run_command(cmd)
+    if rc != 0:
+        module.fail_json(
+            msg="Unable to remove a key with id %s" % (key_id),
+            cmd=cmd,
+            rc=rc,
+            key_id=key_id,
+            stdout=out,
+            stderr=err,
+        )
     return True
 
 
@@ -363,7 +422,6 @@ def main():
             url=dict(type='str'),
             data=dict(type='str'),
             file=dict(type='path'),
-            key=dict(type='str', removed_in_version='2.14', removed_from_collection='ansible.builtin', no_log=False),
             keyring=dict(type='path'),
             validate_certs=dict(type='bool', default=True),
             keyserver=dict(type='str'),

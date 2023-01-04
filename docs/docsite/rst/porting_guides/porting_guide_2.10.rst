@@ -43,8 +43,8 @@ Command Line
 ============
 
 * The ``ansible-galaxy login`` command has been removed, as the underlying API it used for GitHub auth is being shut down. Publishing roles or
-  collections to Galaxy via ``ansible-galaxy`` now requires that a Galaxy API token be passed to the CLI via a token file (default location
-  ``~/.ansible/galaxy_token``) or (insecurely) via the ``--token`` argument to ``ansible-galaxy``.
+  collections to Galaxy through ``ansible-galaxy`` now requires that a Galaxy API token be passed to the CLI through a token file (default location
+  ``~/.ansible/galaxy_token``) or (insecurely) through the ``--token`` argument to ``ansible-galaxy``.
 
 
 Deprecated
@@ -80,7 +80,7 @@ Plugins
 Lookup plugin names case-sensitivity
 ------------------------------------
 
-* Prior to Ansible ``2.10`` lookup plugin names passed in as an argument to the ``lookup()`` function were treated as case-insensitive as opposed to lookups invoked via ``with_<lookup_name>``. ``2.10`` brings consistency to ``lookup()`` and ``with_`` to be both case-sensitive.
+* Prior to Ansible ``2.10`` lookup plugin names passed in as an argument to the ``lookup()`` function were treated as case-insensitive as opposed to lookups invoked through ``with_<lookup_name>``. ``2.10`` brings consistency to ``lookup()`` and ``with_`` to be both case-sensitive.
 
 Noteworthy plugin changes
 -------------------------
@@ -112,7 +112,7 @@ community.general
 Major Changes
 -------------
 
-- Restricting the version of the community.okd collection to 1.0.0. The previously included version, 1.0.1, had a dependency on kubernetes.core and thus required the installation of an additional collection that was not included in Ansible 2.10. Version 1.0.0 is essentially identical to 1.0.1, except that it uses community.kubernetes, wihch is included in Ansible 2.10.
+- Restricting the version of the community.okd collection to 1.0.0. The previously included version, 1.0.1, had a dependency on kubernetes.core and thus required the installation of an additional collection that was not included in Ansible 2.10. Version 1.0.0 is essentially identical to 1.0.1, except that it uses community.kubernetes, which is included in Ansible 2.10.
 
 ovirt.ovirt
 ~~~~~~~~~~~
@@ -229,10 +229,10 @@ netbox.netbox
 
 - nb_inventory - Add ``dns_name`` option that adds ``dns_name`` to the host when ``True`` and device has a primary IP address. (#394)
 - nb_inventory - Add ``status`` as a ``group_by`` option. (398)
-- nb_inventory - Move around ``extracted_primary_ip`` to allow for ``config_context`` or ``custom_field`` to overwite. (#377)
+- nb_inventory - Move around ``extracted_primary_ip`` to allow for ``config_context`` or ``custom_field`` to overwrite. (#377)
 - nb_inventory - Services are now a list of integers due to NetBox 2.10 changes. (#396)
 - nb_lookup - Allow ID to be passed in and use ``.get`` instead of ``.filter``. (#376)
-- nb_lookup - Allow ``api_endpoint`` and ``token`` to be found via env. (#391)
+- nb_lookup - Allow ``api_endpoint`` and ``token`` to be found through env. (#391)
 
 Deprecated Features
 -------------------
@@ -339,7 +339,7 @@ community.docker
 - docker_image - the ``source`` option is now mandatory (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_image - the ``use_tls`` option has been removed. Use ``tls`` and ``validate_certs`` instead (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_image - the default of the ``build.pull`` option changed to ``false`` (https://github.com/ansible-collections/community.docker/pull/1).
-- docker_image_facts - this alias is on longer availabe, use ``docker_image_info`` instead (https://github.com/ansible-collections/community.docker/pull/1).
+- docker_image_facts - this alias is on longer available, use ``docker_image_info`` instead (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_network - no longer returns ``ansible_facts`` (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_network - the ``ipam_options`` option has been removed. Use ``ipam_config`` instead (https://github.com/ansible-collections/community.docker/pull/1).
 - docker_service - no longer returns ``ansible_facts`` (https://github.com/ansible-collections/community.docker/pull/1).
@@ -436,7 +436,7 @@ Deprecated Features
 cisco.nxos
 ~~~~~~~~~~
 
-- Deprecated `nxos_smu` in favour of `nxos_rpm` module.
+- Deprecated `nxos_smu` in favor of `nxos_rpm` module.
 - The `nxos_ospf_vrf` module is deprecated by `nxos_ospfv2` and `nxos_ospfv3` Resource Modules.
 
 Porting Guide for v2.10.0
@@ -468,9 +468,9 @@ community.grafana
 Breaking Changes
 ----------------
 
-- cisco.nxos.nxos_igmp_interface - no longer supports the deprecated ``oif_prefix`` and ``oif_source`` options. These have been superceeded by ``oif_ps``.
+- cisco.nxos.nxos_igmp_interface - no longer supports the deprecated ``oif_prefix`` and ``oif_source`` options. These have been superseded by ``oif_ps``.
 - community.grafana.grafana_dashboard - the parameter ``message`` is renamed to ``commit_message`` since ``message`` is used by Ansible Core engine internally.
-- purestorage.flashblade.purefb_fs - no longer supports the deprecated ``nfs`` option. This has been superceeded by ``nfsv3``.
+- purestorage.flashblade.purefb_fs - no longer supports the deprecated ``nfs`` option. This has been superseded by ``nfsv3``.
 
 amazon.aws
 ~~~~~~~~~~
@@ -561,13 +561,13 @@ netbox.netbox
 - Change ``ip-addresses`` key in netbox inventory plugin to ``ip_addresses`` (https://github.com/netbox-community/ansible_modules/issues/139)
 - Changed ``group`` to ``tenant_group`` in ``netbox_tenant.py`` (https://github.com/netbox-community/ansible_modules/issues/9)
 - Changed ``role`` to ``prefix_role`` in ``netbox_prefix.py`` (https://github.com/netbox-community/ansible_modules/issues/9)
-- Module failures when required fields arent provided (https://github.com/netbox-community/ansible_modules/issues/24)
+- Module failures when required fields aren't provided (https://github.com/netbox-community/ansible_modules/issues/24)
 - Renamed ``netbox_interface`` to ``netbox_device_interface`` (https://github.com/netbox-community/ansible_modules/issues/9)
 - This version has a few breaking changes due to new namespace and collection name. I felt it necessary to change the name of the lookup plugin and inventory plugin just not to have a non descriptive namespace call to use them. Below is an example:
   ``netbox.netbox.netbox`` would be used for both inventory plugin and lookup plugin, but in different contexts so no collision will arise, but confusion will.
   I renamed the lookup plugin to ``nb_lookup`` so it will be used with the FQCN ``netbox.netbox.nb_lookup``.
   The inventory plugin will now be called within an inventory file by ``netbox.netbox.nb_inventory``
-- To pass in integers via Ansible Jinja filters for a key in ``data`` that
+- To pass in integers through Ansible Jinja filters for a key in ``data`` that
   requires querying an endpoint is now done by making it a dictionary with
   an ``id`` key. The previous behavior was to just pass in an integer and
   it was converted when normalizing the data, but some people may have names
@@ -674,7 +674,7 @@ community.kubernetes
 - k8s - Module migrated from Ansible 2.9 to Kubernetes collection.
 - k8s_auth - Module migrated from Ansible 2.9 to Kubernetes collection.
 - k8s_config_resource_name - Filter plugin migrated from Ansible 2.9 to Kubernetes collection.
-- k8s_exec - New module for executing commands on pods via Kubernetes API (https://github.com/ansible-collections/community.kubernetes/pull/14).
+- k8s_exec - New module for executing commands on pods through Kubernetes API (https://github.com/ansible-collections/community.kubernetes/pull/14).
 - k8s_exec - Return rc for the command executed (https://github.com/ansible-collections/community.kubernetes/pull/158).
 - k8s_info - Module migrated from Ansible 2.9 to Kubernetes collection.
 - k8s_log - New module for retrieving pod logs (https://github.com/ansible-collections/community.kubernetes/pull/16).
@@ -834,7 +834,7 @@ community.vmware
 community.windows
 ~~~~~~~~~~~~~~~~~
 
-- win_disk_image - removed the deprecated return value ``mount_path`` in favour of ``mount_paths``.
+- win_disk_image - removed the deprecated return value ``mount_path`` in favor of ``mount_paths``.
 - win_psexec - removed the deprecated ``extra_opts`` option.
 
 f5networks.f5_modules
@@ -937,7 +937,7 @@ community.general
 - redfish_config - Deprecate ``bios_attribute_name`` and ``bios_attribute_value`` in favor of new `bios_attributes`` option.
 - redfish_config - the ``bios_attribute_name`` and ``bios_attribute_value`` options will be removed. To maintain the existing behavior use the ``bios_attributes`` option instead.
 - redfish_config and redfish_command - the behavior to select the first System, Manager, or Chassis resource to modify when multiple are present will be removed. Use the new ``resource_id`` option to specify target resource to modify.
-- redfish_config, redfish_command - Behavior to modify the first System, Mananger, or Chassis resource when multiple are present is deprecated. Use the new ``resource_id`` option to specify target resource to modify.
+- redfish_config, redfish_command - Behavior to modify the first System, Manager, or Chassis resource when multiple are present is deprecated. Use the new ``resource_id`` option to specify target resource to modify.
 - xbps - the ``force`` option never had any effect. It is now deprecated, and will be removed in 3.0.0 (https://github.com/ansible-collections/community.general/pull/568).
 
 community.vmware
@@ -945,14 +945,14 @@ community.vmware
 
 - The vmware_dns_config module has been deprecated and will be removed in a later release; use vmware_host_dns instead.
 - vca - vca_fw, vca_nat, vca_app are deprecated since these modules rely on deprecated part of Pyvcloud library.
-- vmware_dns_config - Deprecate in favour of new module vmware_host_dns.
+- vmware_dns_config - Deprecate in favor of new module vmware_host_dns.
 - vmware_guest - deprecate specifying CDROM configuration as a dict, instead use a list.
 - vmware_tag_info - in a later release, the module will not return ``tag_facts`` since it does not return multiple tags with the same name and different category id. To maintain the existing behavior use ``tag_info`` which is a list of tag metadata.
 
 community.zabbix
 ~~~~~~~~~~~~~~~~
 
-- zabbix_proxy (module) - deprecates ``interface`` sub-options ``type`` and ``main`` when proxy type is set to passive via ``status=passive``. Make sure these suboptions are removed from your playbook as they were never supported by Zabbix in the first place.
+- zabbix_proxy (module) - deprecates ``interface`` sub-options ``type`` and ``main`` when proxy type is set to passive through ``status=passive``. Make sure these suboptions are removed from your playbook as they were never supported by Zabbix in the first place.
 
 f5networks.f5_modules
 ~~~~~~~~~~~~~~~~~~~~~

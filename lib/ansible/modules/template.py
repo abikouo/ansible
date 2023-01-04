@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2017, Ansible Project
@@ -19,14 +18,16 @@ options:
   follow:
     description:
     - Determine whether symbolic links should be followed.
-    - When set to C(yes) symbolic links will be followed, if they exist.
-    - When set to C(no) symbolic links will not be followed.
-    - Previous to Ansible 2.4, this was hardcoded as C(yes).
+    - When set to C(true) symbolic links will be followed, if they exist.
+    - When set to C(false) symbolic links will not be followed.
+    - Previous to Ansible 2.4, this was hardcoded as C(true).
     type: bool
     default: no
     version_added: '2.4'
 notes:
-- For Windows you can use M(ansible.windows.win_template) which uses '\\r\\n' as C(newline_sequence) by default.
+- For Windows you can use M(ansible.windows.win_template) which uses C(\r\n) as C(newline_sequence) by default.
+- The C(jinja2_native) setting has no effect. Native types are never used in the C(template) module which is by design used for generating text files.
+  For working with templates and utilizing Jinja2 native types see the C(jinja2_native) parameter of the C(template lookup).
 seealso:
 - module: ansible.builtin.copy
 - module: ansible.windows.win_copy
@@ -35,10 +36,30 @@ author:
 - Ansible Core Team
 - Michael DeHaan
 extends_documentation_fragment:
+- action_common_attributes
+- action_common_attributes.flow
+- action_common_attributes.files
 - backup
 - files
 - template_common
 - validate
+attributes:
+    action:
+      support: full
+    async:
+      support: none
+    bypass_host_loop:
+      support: none
+    check_mode:
+      support: full
+    diff_mode:
+      support: full
+    platform:
+      platforms: posix
+    safe_file_operations:
+      support: full
+    vault:
+      support: full
 '''
 
 EXAMPLES = r'''

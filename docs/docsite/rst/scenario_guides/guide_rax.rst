@@ -6,7 +6,7 @@ Rackspace Cloud Guide
 Introduction
 ````````````
 
-.. note:: This section of the documentation is under construction. We are in the process of adding more examples about the Rackspace modules and how they work together.  Once complete, there will also be examples for Rackspace Cloud in `ansible-examples <https://github.com/ansible/ansible-examples/>`_.
+.. note:: Rackspace functionality in Ansible is not maintained and users should consider the `OpenStack collection <https://galaxy.ansible.com/openstack/cloud>`_ instead.
 
 Ansible contains a number of core modules for interacting with Rackspace Cloud.  
 
@@ -18,7 +18,7 @@ all of the modules require and are tested against pyrax 1.5 or higher.
 You'll need this Python module installed on the execution host.  
 
 ``pyrax`` is not currently available in many operating system
-package repositories, so you will likely need to install it via pip:
+package repositories, so you will likely need to install it through pip:
 
 .. code-block:: bash
 
@@ -69,7 +69,7 @@ Running from a Python Virtual Environment (Optional)
 
 Most users will not be using virtualenv, but some users, particularly Python developers sometimes like to.
 
-There are special considerations when Ansible is installed to a Python virtualenv, rather than the default of installing at a global scope. Ansible assumes, unless otherwise instructed, that the python binary will live at /usr/bin/python.  This is done via the interpreter line in modules, however when instructed by setting the inventory variable 'ansible_python_interpreter', Ansible will use this specified path instead to find Python.  This can be a cause of confusion as one may assume that modules running on 'localhost', or perhaps running via 'local_action', are using the virtualenv Python interpreter.  By setting this line in the inventory, the modules will execute in the virtualenv interpreter and have available the virtualenv packages, specifically pyrax. If using virtualenv, you may wish to modify your localhost inventory definition to find this location as follows:
+There are special considerations when Ansible is installed to a Python virtualenv, rather than the default of installing at a global scope. Ansible assumes, unless otherwise instructed, that the python binary will live at /usr/bin/python.  This is done through the interpreter line in modules, however when instructed by setting the inventory variable 'ansible_python_interpreter', Ansible will use this specified path instead to find Python.  This can be a cause of confusion as one may assume that modules running on 'localhost', or perhaps running through 'local_action', are using the virtualenv Python interpreter.  By setting this line in the inventory, the modules will execute in the virtualenv interpreter and have available the virtualenv packages, specifically pyrax. If using virtualenv, you may wish to modify your localhost inventory definition to find this location as follows:
 
 .. code-block:: ini
 
@@ -118,7 +118,7 @@ Here's what it would look like in a playbook, assuming the parameters were defin
             image: "{{ rax_image }}"
             count: "{{ rax_count }}"
             group: "{{ group }}"
-            wait: yes
+            wait: true
         register: rax
         delegate_to: localhost
 
@@ -154,7 +154,7 @@ to the next section.
 Host Inventory
 ``````````````
 
-Once your nodes are spun up, you'll probably want to talk to them again.  The best way to handle this is to use the "rax" inventory plugin, which dynamically queries Rackspace Cloud and tells Ansible what nodes you have to manage.  You might want to use this even if you are spinning up cloud instances via other tools, including the Rackspace Cloud user interface. The inventory plugin can be used to group resources by metadata, region, OS, and so on.  Utilizing metadata is highly recommended in "rax" and can provide an easy way to sort between host groups and roles. If you don't want to use the ``rax.py`` dynamic inventory script, you could also still choose to manually manage your INI inventory file, though this is less recommended.
+Once your nodes are spun up, you'll probably want to talk to them again.  The best way to handle this is to use the "rax" inventory plugin, which dynamically queries Rackspace Cloud and tells Ansible what nodes you have to manage.  You might want to use this even if you are spinning up cloud instances through other tools, including the Rackspace Cloud user interface. The inventory plugin can be used to group resources by metadata, region, OS, and so on.  Utilizing metadata is highly recommended in "rax" and can provide an easy way to sort between host groups and roles. If you don't want to use the ``rax.py`` dynamic inventory script, you could also still choose to manually manage your INI inventory file, though this is less recommended.
 
 In Ansible it is quite possible to use multiple dynamic inventory plugins along with INI file data.  Just put them in a common directory and be sure the scripts are chmod +x, and the INI-based ones are not.
 
@@ -167,7 +167,7 @@ To use the Rackspace dynamic inventory script, copy ``rax.py`` into your invento
 
 .. note:: Dynamic inventory scripts (like ``rax.py``) are saved in ``/usr/share/ansible/inventory`` if Ansible has been installed globally.  If installed to a virtualenv, the inventory scripts are installed to ``$VIRTUALENV/share/inventory``.
 
-.. note:: Users of :ref:`ansible_tower` will note that dynamic inventory is natively supported by Tower, and all you have to do is associate a group with your Rackspace Cloud credentials, and it will easily synchronize without going through these steps::
+.. note:: Users of :ref:`ansible_platform` will note that dynamic inventory is natively supported by the controller in the platform, and all you have to do is associate a group with your Rackspace Cloud credentials, and it will easily synchronize without going through these steps::
 
     $ RAX_CREDS_FILE=~/.raxpub ansible all -i rax.py -m setup
 
@@ -314,7 +314,7 @@ This can be achieved with the ``rax_facts`` module and an inventory file similar
 
 While you don't need to know how it works, it may be interesting to know what kind of variables are returned.
 
-The ``rax_facts`` module provides facts as followings, which match the ``rax.py`` inventory script:
+The ``rax_facts`` module provides facts as following, which match the ``rax.py`` inventory script:
 
 .. code-block:: json
 
@@ -442,9 +442,9 @@ Create an isolated cloud network and build a server
             region: IAD
             state: present
             count: 5
-            exact_count: yes
+            exact_count: true
             group: web
-            wait: yes
+            wait: true
             wait_timeout: 360
           register: rax
           delegate_to: localhost
@@ -473,7 +473,7 @@ Build a complete webserver environment with servers, custom networks and load ba
             type: PUBLIC
             timeout: 30
             region: IAD
-            wait: yes
+            wait: true
             state: present
             meta:
               app: my-cool-app
@@ -502,9 +502,9 @@ Build a complete webserver environment with servers, custom networks and load ba
             region: IAD
             state: present
             count: 5
-            exact_count: yes
+            exact_count: true
             group: web
-            wait: yes
+            wait: true
           register: rax
 
         - name: Add servers to web host group
@@ -525,7 +525,7 @@ Build a complete webserver environment with servers, custom networks and load ba
             port: 80
             condition: enabled
             type: primary
-            wait: yes
+            wait: true
             region: IAD
           loop: "{{ rax.success }}"
           when: rax.action == 'create'
@@ -583,9 +583,9 @@ Using a Control Machine
             region: DFW
             state: present
             count: 1
-            exact_count: yes
+            exact_count: true
             group: web
-            wait: yes
+            wait: true
           register: rax
 
         - name: Add servers to in memory groups
@@ -676,7 +676,7 @@ Using Ansible Pull
             - name: Wait for rackconnect automation to complete
               uri:
                 url: "https://{{ rax_region.stdout|trim }}.api.rackconnect.rackspace.com/v1/automation_status?format=json"
-                return_content: yes
+                return_content: true
               register: automation_status
               when: bootstrap.stat.exists != True
               until: automation_status['automation_status']|default('') == 'DEPLOYED'
@@ -782,15 +782,14 @@ Advanced Usage
 
 .. _awx_autoscale:
 
-Autoscaling with Tower
-++++++++++++++++++++++
+Autoscaling with AWX or Red Hat Ansible Automation Platform
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-:ref:`ansible_tower` also contains a very nice feature for auto-scaling use cases.  
-In this mode, a simple curl script can call a defined URL and the server will "dial out" to the requester 
-and configure an instance that is spinning up.  This can be a great way to reconfigure ephemeral nodes.
-See the Tower documentation for more details.  
+The GUI component of :ref:`Red Hat Ansible Automation Platform <ansible_tower>` also contains a very nice feature for auto-scaling use cases.  In this mode, a simple curl script can call
+a defined URL and the server will "dial out" to the requester and configure an instance that is spinning up.  This can be a great way
+to reconfigure ephemeral nodes.  See `the documentation on provisioning callbacks <https://docs.ansible.com/ansible-tower/latest/html/userguide/job_templates.html#provisioning-callbacks>`_ for more details.
 
-A benefit of using the callback in Tower over pull mode is that job results are still centrally recorded 
+A benefit of using the callback approach over pull mode is that job results are still centrally recorded 
 and less information has to be shared with remote hosts.
 
 .. _pending_information:

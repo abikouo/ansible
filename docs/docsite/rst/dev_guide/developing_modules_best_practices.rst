@@ -37,7 +37,7 @@ General guidelines & tips
 * If you have a local module that returns information specific to your installations, a good name for this module is ``site_info``.
 * Eliminate or minimize dependencies. If your module has dependencies, document them at the top of the module file and raise JSON error messages when dependency import fails.
 * Don't write to files directly; use a temporary file and then use the ``atomic_move`` function from ``ansible.module_utils.basic`` to move the updated temporary file into place. This prevents data corruption and ensures that the correct context for the file is kept.
-* Avoid creating caches. Ansible is designed without a central server or authority, so you cannot guarantee it will not run with different permissions, options or locations. If you need a central authority, have it on top of Ansible (for example, using bastion/cm/ci server or tower); do not try to build it into modules.
+* Avoid creating caches. Ansible is designed without a central server or authority, so you cannot guarantee it will not run with different permissions, options or locations. If you need a central authority, have it on top of Ansible (for example, using bastion/cm/ci server, AWX, or the Red Hat Ansible Automation Platform); do not try to build it into modules.
 * If you package your module(s) in an RPM, install the modules on the control machine in ``/usr/share/ansible``. Packaging modules in RPMs is optional.
 
 Functions and Methods
@@ -105,7 +105,7 @@ Handling module failures
 When your module fails, help users understand what went wrong. If you are using the ``AnsibleModule`` common Python code, the ``failed`` element will be included for you automatically when you call ``fail_json``. For polite module failure behavior:
 
 * Include a key of ``failed`` along with a string explanation in ``msg``. If you don't do this, Ansible will use standard return codes: 0=success and non-zero=failure.
-* Don't raise a traceback (stacktrace). Ansible can deal with stacktraces and automatically converts anything unparseable into a failed result, but raising a stacktrace on module failure is not user-friendly.
+* Don't raise a traceback (stacktrace). Ansible can deal with stacktraces and automatically converts anything unparsable into a failed result, but raising a stacktrace on module failure is not user-friendly.
 * Do not use ``sys.exit()``. Use ``fail_json()`` from the module object.
 
 Handling exceptions (bugs) gracefully
@@ -160,7 +160,6 @@ Ansible conventions offer a predictable user interface across all modules, playb
 * Implement declarative operations (not CRUD) so the user can ignore existing state and focus on final state. For example, use ``started/stopped``, ``present/absent``.
 * Strive for a consistent final state (aka idempotency). If running your module twice in a row against the same system would result in two different states, see if you can redesign or rewrite to achieve consistent final state. If you can't, document the behavior and the reasons for it.
 * Provide consistent return values within the standard Ansible return structure, even if NA/None are used for keys normally returned under other options.
-* Follow additional guidelines that apply to families of modules if applicable. For example, AWS modules should follow the  :ref:`Amazon development checklist <AWS_module_development>`.
 
 
 Module Security

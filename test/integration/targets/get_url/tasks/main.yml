@@ -367,6 +367,22 @@
       30949cc401e30ac494d695ab8764a9f76aae17c5d73c67f65e9b558f47eff892  ./not_target1.txt
       d0dbfc1945bc83bf6606b770e442035f2c4e15c886ee0c22fb3901ba19900b5b  ./not_target2.txt
 
+- name: create sha256 checksum file of src with a * leading path
+  copy:
+    dest: '{{ files_dir }}/sha256sum_with_asterisk.txt'
+    content: |
+      b1b6ce5073c8fac263a8fc5edfffdbd5dec1980c784e09c5bc69f8fb6056f006. *27617.txt
+      b1b6ce5073c8fac263a8fc5edfffdbd5dec1980c784e09c5bc69f8fb6056f006. *71420.txt
+      30949cc401e30ac494d695ab8764a9f76aae17c5d73c67f65e9b558f47eff892 *not_target1.txt
+      d0dbfc1945bc83bf6606b770e442035f2c4e15c886ee0c22fb3901ba19900b5b *not_target2.txt
+
+# completing 27617 with bug 54390
+- name: create sha256 checksum only with no filename inside
+  copy:
+    dest: '{{ files_dir }}/sha256sum_checksum_only.txt'
+    content: |
+      b1b6ce5073c8fac263a8fc5edfffdbd5dec1980c784e09c5bc69f8fb6056f006
+
 - copy:
     src: "testserver.py"
     dest: "{{ remote_tmp_dir }}/testserver.py"
@@ -423,6 +439,17 @@
     path: "{{ remote_tmp_dir }}/27617sha256_with_dot.txt"
   register: stat_result_sha256_with_dot
 
+- name: download src with sha256 checksum url with asterisk leading paths
+  get_url:
+    url: 'http://localhost:{{ http_port }}/27617.txt'
+    dest: '{{ remote_tmp_dir }}/27617sha256_with_asterisk.txt'
+    checksum: 'sha256:http://localhost:{{ http_port }}/sha256sum_with_asterisk.txt'
+  register: result_sha256_with_asterisk
+
+- stat:
+    path: "{{ remote_tmp_dir }}/27617sha256_with_asterisk.txt"
+  register: stat_result_sha256_with_asterisk
+
 - name: download src with sha256 checksum url with file scheme
   get_url:
     url: 'http://localhost:{{ http_port }}/27617.txt'
@@ -467,6 +494,17 @@
     path: "{{ remote_tmp_dir }}/71420sha256_with_dot.txt"
   register: stat_result_sha256_with_dot_71420
 
+- name: download 71420.txt with sha256 checksum url with asterisk leading paths
+  get_url:
+    url: 'http://localhost:{{ http_port }}/71420.txt'
+    dest: '{{ remote_tmp_dir }}/71420sha256_with_asterisk.txt'
+    checksum: 'sha256:http://localhost:{{ http_port }}/sha256sum_with_asterisk.txt'
+  register: result_sha256_with_asterisk_71420
+
+- stat:
+    path: "{{ remote_tmp_dir }}/71420sha256_with_asterisk.txt"
+  register: stat_result_sha256_with_asterisk_71420
+
 - name: download 71420.txt with sha256 checksum url with file scheme
   get_url:
     url: 'http://localhost:{{ http_port }}/71420.txt'
@@ -478,26 +516,43 @@
     path: "{{ remote_tmp_dir }}/71420sha256_with_dot.txt"
   register: stat_result_sha256_with_file_scheme_71420
 
+- name: download src with sha256 checksum url with no filename
+  get_url:
+    url: 'http://localhost:{{ http_port }}/27617.txt'
+    dest: '{{ remote_tmp_dir }}/27617sha256_with_no_filename.txt'
+    checksum: 'sha256:http://localhost:{{ http_port }}/sha256sum_checksum_only.txt'
+  register: result_sha256_checksum_only
+
+- stat:
+    path: "{{ remote_tmp_dir }}/27617.txt"
+  register: stat_result_sha256_checksum_only
+
 - name: Assert that the file was downloaded
   assert:
     that:
-      - result_sha1_check_mode is changed
       - result_sha1 is changed
+      - result_sha1_check_mode is changed
       - result_sha256 is changed
       - result_sha256_with_dot is changed
+      - result_sha256_with_asterisk is changed
       - result_sha256_with_file_scheme is changed
       - "stat_result_sha1.stat.exists == true"
       - "stat_result_sha256.stat.exists == true"
       - "stat_result_sha256_with_dot.stat.exists == true"
+      - "stat_result_sha256_with_asterisk.stat.exists == true"
       - "stat_result_sha256_with_file_scheme.stat.exists == true"
       - result_sha1_71420 is changed
       - result_sha256_71420 is changed
       - result_sha256_with_dot_71420 is changed
+      - result_sha256_with_asterisk_71420 is changed
+      - result_sha256_checksum_only is changed
       - result_sha256_with_file_scheme_71420 is changed
       - "stat_result_sha1_71420.stat.exists == true"
       - "stat_result_sha256_71420.stat.exists == true"
       - "stat_result_sha256_with_dot_71420.stat.exists == true"
+      - "stat_result_sha256_with_asterisk_71420.stat.exists == true"
       - "stat_result_sha256_with_file_scheme_71420.stat.exists == true"
+      - "stat_result_sha256_checksum_only.stat.exists == true"
 
 #https://github.com/ansible/ansible/issues/16191
 - name: Test url split with no filename
@@ -524,6 +579,36 @@
       - (result.content | b64decode | from_json).headers.get('Foo') == 'bar'
       - (result.content | b64decode | from_json).headers.get('Baz') == 'qux'
 
+- name: Test gzip decompression
+  get_url:
+    url: https://{{ httpbin_host }}/gzip
+    dest: "{{ remote_tmp_dir }}/gzip.json"
+
+- name: Get gzip file contents
+  slurp:
+    path: "{{ remote_tmp_dir }}/gzip.json"
+  register: gzip_json
+
+- name: validate gzip decompression
+  assert:
+    that:
+      - (gzip_json.content|b64decode|from_json).gzipped
+
+- name: Test gzip no decompression
+  get_url:
+    url: https://{{ httpbin_host }}/gzip
+    dest: "{{ remote_tmp_dir }}/gzip.json.gz"
+    decompress: no
+
+- name: Get gzip file contents
+  command: 'gunzip -c {{ remote_tmp_dir }}/gzip.json.gz'
+  register: gzip_json
+
+- name: validate gzip no decompression
+  assert:
+    that:
+      - (gzip_json.stdout|from_json).gzipped
+
 - name: Test client cert auth, with certs
   get_url:
     url: "https://ansible.http.tests/ssl_client_verify"
@@ -544,6 +629,35 @@
       - '(result.content | b64decode) == "ansible.http.tests:SUCCESS"'
   when: has_httptester
 
+- name: test unredirected_headers
+  get_url:
+    url: 'https://{{ httpbin_host }}/redirect-to?status_code=301&url=/basic-auth/user/passwd'
+    username: user
+    password: passwd
+    force_basic_auth: true
+    unredirected_headers:
+      - authorization
+    dest: "{{ remote_tmp_dir }}/doesnt_matter"
+  ignore_errors: true
+  register: unredirected_headers
+
+- name: test unredirected_headers
+  get_url:
+    url: 'https://{{ httpbin_host }}/redirect-to?status_code=301&url=/basic-auth/user/passwd'
+    username: user
+    password: passwd
+    force_basic_auth: true
+    dest: "{{ remote_tmp_dir }}/doesnt_matter"
+  register: redirected_headers
+
+- name: ensure unredirected_headers caused auth to fail
+  assert:
+    that:
+      - unredirected_headers is failed
+      - unredirected_headers.status_code == 401
+      - redirected_headers is successful
+      - redirected_headers.status_code == 200
+
 - name: Test use_gssapi=True
   include_tasks:
     file: use_gssapi.yml
@@ -552,3 +666,9 @@
         KRB5_CONFIG: '{{ krb5_config }}'
         KRB5CCNAME: FILE:{{ remote_tmp_dir }}/krb5.cc
   when: krb5_config is defined
+
+- name: Test ciphers
+  import_tasks: ciphers.yml
+
+- name: Test use_netrc=False
+  import_tasks: use_netrc.yml

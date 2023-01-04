@@ -1,4 +1,5 @@
 - import_tasks: prepare_tests.yml
+- import_tasks: test_missing_binaries.yml
 - import_tasks: test_tar.yml
 - import_tasks: test_tar_gz.yml
 - import_tasks: test_tar_gz_creates.yml
@@ -16,3 +17,6 @@
 - import_tasks: test_symlink.yml
 - import_tasks: test_download.yml
 - import_tasks: test_unprivileged_user.yml
+- import_tasks: test_different_language_var.yml
+- import_tasks: test_invalid_options.yml
+- import_tasks: test_ownership_top_folder.yml

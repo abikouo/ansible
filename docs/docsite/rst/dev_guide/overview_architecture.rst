@@ -40,7 +40,9 @@ To add new machines, there is no additional SSL signing server involved, so ther
 
 If there's another source of truth in your infrastructure, Ansible can also connect to that. Ansible can draw inventory, group, and variable information from sources like EC2, Rackspace, OpenStack, and more.
 
-Here's what a plain text inventory file looks like::
+Here's what a plain text inventory file looks like:
+
+.. code-block:: text
 
     ---
     [webservers]
@@ -51,7 +53,7 @@ Here's what a plain text inventory file looks like::
     db0.example.com
     db1.example.com
 
-Once inventory hosts are listed, variables can be assigned to them in simple text files (in a subdirectory called 'group_vars/' or 'host_vars/' or directly in the inventory file.
+Once inventory hosts are listed, variables can be assigned to them in simple text files (in a subdirectory called 'group_vars/' or 'host_vars/') or directly in the inventory file.
 
 Or, as already mentioned, use a dynamic inventory to pull your inventory from data sources like EC2, Rackspace, or OpenStack.
 
@@ -62,7 +64,9 @@ Playbooks can finely orchestrate multiple slices of your infrastructure topology
 
 Ansible's approach to orchestration is one of finely-tuned simplicity, as we believe your automation code should make perfect sense to you years down the road and there should be very little to remember about special syntax or features.
 
-Here's what a simple playbook looks like::
+Here's what a simple playbook looks like:
+
+.. code-block:: yaml
 
     ---
     - hosts: webservers

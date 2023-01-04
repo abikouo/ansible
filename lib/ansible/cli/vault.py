@@ -1,16 +1,20 @@
+#!/usr/bin/env python
 # (c) 2014, James Tanner <tanner.jc@gmail.com>
 # Copyright: (c) 2018, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+# PYTHON_ARGCOMPLETE_OK
 
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
+
+# ansible.cli needs to be imported first, to ensure the source bin/* scripts run that code first
+from ansible.cli import CLI
 
 import os
 import sys
 
 from ansible import constants as C
 from ansible import context
-from ansible.cli import CLI
 from ansible.cli.arguments import option_helpers as opt_help
 from ansible.errors import AnsibleOptionsError
 from ansible.module_utils._text import to_text, to_bytes
@@ -31,6 +35,8 @@ class VaultCLI(CLI):
     Because Ansible tasks, handlers, and other objects are data, these can also be encrypted with vault.
     If you'd like to not expose what variables you are using, you can keep an individual task file entirely encrypted.
     '''
+
+    name = 'ansible-vault'
 
     FROM_STDIN = "stdin"
     FROM_ARGS = "the command line args"
@@ -370,12 +376,20 @@ class VaultCLI(CLI):
         # Format the encrypted strings and any corresponding stderr output
         outputs = self._format_output_vault_strings(b_plaintext_list, vault_id=self.encrypt_vault_id)
 
+        b_outs = []
         for output in outputs:
             err = output.get('err', None)
             out = output.get('out', '')
             if err:
                 sys.stderr.write(err)
-            print(out)
+            b_outs.append(to_bytes(out))
+
+        # The output must end with a newline to play nice with terminal representation.
+        # Refs:
+        # * https://stackoverflow.com/a/729795/595220
+        # * https://github.com/ansible/ansible/issues/78932
+        b_outs.append(b'')
+        self.editor.write_data(b'\n'.join(b_outs), context.CLIARGS['output_file'] or '-')
 
         if sys.stdout.isatty():
             display.display("Encryption successful", stderr=True)
@@ -399,8 +413,7 @@ class VaultCLI(CLI):
             # (the text itself, which input it came from, its name)
             b_plaintext, src, name = b_plaintext_info
 
-            b_ciphertext = self.editor.encrypt_bytes(b_plaintext, self.encrypt_secret,
-                                                     vault_id=vault_id)
+            b_ciphertext = self.editor.encrypt_bytes(b_plaintext, self.encrypt_secret, vault_id=vault_id)
 
             # block formatting
             yaml_text = self.format_ciphertext_yaml(b_ciphertext, name=name)
@@ -462,3 +475,11 @@ class VaultCLI(CLI):
                                    self.new_encrypt_vault_id)
 
         display.display("Rekey successful", stderr=True)
+
+
+def main(args=None):
+    VaultCLI.cli_executor(args)
+
+
+if __name__ == '__main__':
+    main()

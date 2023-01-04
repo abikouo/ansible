@@ -15,8 +15,8 @@ DOCUMENTATION = """
       - 'Arguments can be specified as key=value pair strings or as a shortcut form of the arguments string is also accepted: [start-]end[/stride][:format].'
       - 'Numerical values can be specified in decimal, hexadecimal (0x3f8) or octal (0600).'
       - Starting at version 1.9.2, negative strides are allowed.
-      - Generated items are strings. Use Jinja2 filters to convert items to preferred type, e.g. ``{{ 1 + item|int }}``.
-      - See also Jinja2 ``range`` filter as an alternative.
+      - Generated items are strings. Use Jinja2 filters to convert items to preferred type, e.g. C({{ 1 + item|int }}).
+      - See also Jinja2 C(range) filter as an alternative.
     options:
       start:
         description: number at which to start the sequence
@@ -39,31 +39,31 @@ DOCUMENTATION = """
 
 EXAMPLES = """
 - name: create some test users
-  user:
+  ansible.builtin.user:
     name: "{{ item }}"
     state: present
     groups: "evens"
   with_sequence: start=0 end=32 format=testuser%02x
 
 - name: create a series of directories with even numbers for some reason
-  file:
+  ansible.builtin.file:
     dest: "/var/stuff/{{ item }}"
     state: directory
   with_sequence: start=4 end=16 stride=2
 
 - name: a simpler way to use the sequence plugin create 4 groups
-  group:
+  ansible.builtin.group:
     name: "group{{ item }}"
     state: present
   with_sequence: count=4
 
 - name: the final countdown
-  debug:
+  ansible.builtin.debug:
     msg: "{{item}} seconds to detonation"
   with_sequence: start=10 end=0 stride=-1
 
 - name: Use of variable
-  debug:
+  ansible.builtin.debug:
     msg: "{{ item }}"
   with_sequence: start=1 end="{{ end_at }}"
   vars:
@@ -81,7 +81,6 @@ RETURN = """
 from re import compile as re_compile, IGNORECASE
 
 from ansible.errors import AnsibleError
-from ansible.module_utils.six.moves import xrange
 from ansible.parsing.splitter import parse_kv
 from ansible.plugins.lookup import LookupBase
 
@@ -159,15 +158,15 @@ class LookupModule(LookupBase):
                 setattr(self, arg, arg_cooked)
             except ValueError:
                 raise AnsibleError(
-                    "can't parse arg %s=%r as integer"
+                    "can't parse %s=%s as integer"
                     % (arg, arg_raw)
                 )
         if 'format' in args:
             self.format = args.pop("format")
         if args:
             raise AnsibleError(
-                "unrecognized arguments to with_sequence: %r"
-                % args.keys()
+                "unrecognized arguments to with_sequence: %s"
+                % list(args.keys())
             )
 
     def parse_simple_args(self, term):
@@ -231,7 +230,7 @@ class LookupModule(LookupBase):
             adjust = 1
         else:
             adjust = -1
-        numbers = xrange(self.start, self.end + adjust, self.stride)
+        numbers = range(self.start, self.end + adjust, self.stride)
 
         for i in numbers:
             try:

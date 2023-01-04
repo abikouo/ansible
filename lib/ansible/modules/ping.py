@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>
@@ -28,19 +27,26 @@ options:
       - If this parameter is set to C(crash), the module will cause an exception.
     type: str
     default: pong
+extends_documentation_fragment:
+    - action_common_attributes
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: none
+    platform:
+        platforms: posix
 seealso:
   - module: ansible.netcommon.net_ping
   - module: ansible.windows.win_ping
 author:
   - Ansible Core Team
   - Michael DeHaan
-notes:
-  - Supports C(check_mode).
 '''
 
 EXAMPLES = '''
 # Test we can logon to 'webservers' and execute python with json lib.
-# ansible webservers -m ping
+# ansible webservers -m ansible.builtin.ping
 
 - name: Example from an Ansible Playbook
   ansible.builtin.ping:

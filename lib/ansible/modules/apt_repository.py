@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # encoding: utf-8
 
 # Copyright: (c) 2012, Matt Wright <matt@nobien.net>
@@ -17,10 +16,16 @@ module: apt_repository
 short_description: Add and remove APT repositories
 description:
     - Add or remove an APT repositories in Ubuntu and Debian.
+extends_documentation_fragment: action_common_attributes
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: full
+    platform:
+        platforms: debian
 notes:
-    - This module works on Debian, Ubuntu and their derivatives.
-    - This module supports Debian Squeeze (version 6) as well as its successors.
-    - Supports C(check_mode).
+    - This module supports Debian Squeeze (version 6) as well as its successors and derivatives.
 options:
     repo:
         description:
@@ -59,7 +64,7 @@ options:
         version_added: '2.10'
     validate_certs:
         description:
-            - If C(no), SSL certificates for the target repo will not be validated. This should only be used
+            - If C(false), SSL certificates for the target repo will not be validated. This should only be used
               on personally controlled sites using self-signed certificates.
         type: bool
         default: 'yes'
@@ -94,6 +99,7 @@ version_added: "0.7"
 requirements:
    - python-apt (python 2)
    - python3-apt (python 3)
+   - apt-key or gpg
 '''
 
 EXAMPLES = '''
@@ -126,17 +132,29 @@ EXAMPLES = '''
   ansible.builtin.apt_repository:
     repo: 'ppa:nginx/stable'
     codename: trusty
+
+- name: One way to avoid apt_key once it is removed from your distro
+  block:
+    - name: somerepo |no apt key
+      ansible.builtin.get_url:
+        url: https://download.example.com/linux/ubuntu/gpg
+        dest: /etc/apt/trusted.gpg.d/somerepo.asc
+
+    - name: somerepo | apt source
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/myrepo.asc] https://download.example.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
 '''
 
 RETURN = '''#'''
 
+import copy
 import glob
 import json
 import os
 import re
 import sys
 import tempfile
-import copy
 import random
 import time
 
@@ -145,9 +163,6 @@ from ansible.module_utils.common.respawn import has_respawned, probe_interpreter
 from ansible.module_utils._text import to_native
 from ansible.module_utils.six import PY3
 from ansible.module_utils.urls import fetch_url
-
-# init module names to keep pylint happy
-apt = apt_pkg = aptsources_distro = distro = None
 
 try:
     import apt
@@ -158,10 +173,12 @@ try:
 
     HAVE_PYTHON_APT = True
 except ImportError:
+    apt = apt_pkg = aptsources_distro = distro = None
+
     HAVE_PYTHON_APT = False
 
+APT_KEY_DIRS = ['/etc/apt/keyrings', '/etc/apt/trusted.gpg.d', '/usr/share/keyrings']
 DEFAULT_SOURCES_PERM = 0o0644
-
 VALID_SOURCE_TYPES = ('deb', 'deb-src')
 
 
@@ -307,10 +324,14 @@ class SourcesList(object):
                 d, fn = os.path.split(filename)
                 try:
                     os.makedirs(d)
-                except OSError as err:
+                except OSError as ex:
                     if not os.path.isdir(d):
-                        self.module.fail_json("Failed to create directory %s: %s" % (d, to_native(err)))
-                fd, tmp_path = tempfile.mkstemp(prefix=".%s-" % fn, dir=d)
+                        self.module.fail_json("Failed to create directory %s: %s" % (d, to_native(ex)))
+
+                try:
+                    fd, tmp_path = tempfile.mkstemp(prefix=".%s-" % fn, dir=d)
+                except (OSError, IOError) as e:
+                    self.module.fail_json(msg='Unable to create temp file at "%s" for apt source: %s' % (d, to_native(e)))
 
                 f = os.fdopen(fd, 'w')
                 for n, valid, enabled, source, comment in sources:
@@ -326,8 +347,8 @@ class SourcesList(object):
 
                     try:
                         f.write(line)
-                    except IOError as err:
-                        self.module.fail_json(msg="Failed to write to file %s: %s" % (tmp_path, to_native(err)))
+                    except IOError as ex:
+                        self.module.fail_json(msg="Failed to write to file %s: %s" % (tmp_path, to_native(ex)))
                 self.module.atomic_move(tmp_path, filename)
 
                 # allow the user to override the default mode
@@ -373,6 +394,7 @@ class SourcesList(object):
     def _add_valid_source(self, source_new, comment_new, file):
         # We'll try to reuse disabled source if we have it.
         # If we have more than one entry, we will enable them all - no advanced logic, remember.
+        self.module.log('ading source file: %s | %s | %s' % (source_new, comment_new, file))
         found = False
         for filename, n, enabled, source, comment in self:
             if source == source_new:
@@ -413,17 +435,18 @@ class UbuntuSourcesList(SourcesList):
 
     LP_API = 'https://launchpad.net/api/1.0/~%s/+archive/%s'
 
-    def __init__(self, module, add_ppa_signing_keys_callback=None):
+    def __init__(self, module):
         self.module = module
-        self.add_ppa_signing_keys_callback = add_ppa_signing_keys_callback
         self.codename = module.params['codename'] or distro.codename
         super(UbuntuSourcesList, self).__init__(module)
 
+        self.apt_key_bin = self.module.get_bin_path('apt-key', required=False)
+        self.gpg_bin = self.module.get_bin_path('gpg', required=False)
+        if not self.apt_key_bin and not self.gpg_bin:
+            self.module.fail_json(msg='Either apt-key or gpg binary is required, but neither could be found')
+
     def __deepcopy__(self, memo=None):
-        return UbuntuSourcesList(
-            self.module,
-            add_ppa_signing_keys_callback=self.add_ppa_signing_keys_callback
-        )
+        return UbuntuSourcesList(self.module)
 
     def _get_ppa_info(self, owner_name, ppa_name):
         lp_api = self.LP_API % (owner_name, ppa_name)
@@ -446,9 +469,39 @@ class UbuntuSourcesList(SourcesList):
         return line, ppa_owner, ppa_name
 
     def _key_already_exists(self, key_fingerprint):
-        rc, out, err = self.module.run_command('apt-key export %s' % key_fingerprint, check_rc=True)
-        return len(err) == 0
 
+        if self.apt_key_bin:
+            rc, out, err = self.module.run_command([self.apt_key_bin, 'export', key_fingerprint], check_rc=True)
+            found = len(err) == 0
+        else:
+            found = self._gpg_key_exists(key_fingerprint)
+
+        return found
+
+    def _gpg_key_exists(self, key_fingerprint):
+
+        found = False
+        keyfiles = ['/etc/apt/trusted.gpg']  # main gpg repo for apt
+        for other_dir in APT_KEY_DIRS:
+            # add other known sources of gpg sigs for apt, skip hidden files
+            keyfiles.extend([os.path.join(other_dir, x) for x in os.listdir(other_dir) if not x.startswith('.')])
+
+        for key_file in keyfiles:
+
+            if os.path.exists(key_file):
+                try:
+                    rc, out, err = self.module.run_command([self.gpg_bin, '--list-packets', key_file])
+                except (IOError, OSError) as e:
+                    self.debug("Could check key against file %s: %s" % (key_file, to_native(e)))
+                    continue
+
+                if key_fingerprint in out:
+                    found = True
+                    break
+
+        return found
+
+    # https://www.linuxuprising.com/2021/01/apt-key-is-deprecated-how-to-add.html
     def add_source(self, line, comment='', file=None):
         if line.startswith('ppa:'):
             source, ppa_owner, ppa_name = self._expand_ppa(line)
@@ -457,16 +510,46 @@ class UbuntuSourcesList(SourcesList):
                 # repository already exists
                 return
 
-            if self.add_ppa_signing_keys_callback is not None:
-                info = self._get_ppa_info(ppa_owner, ppa_name)
-                if not self._key_already_exists(info['signing_key_fingerprint']):
-                    command = ['apt-key', 'adv', '--recv-keys', '--no-tty', '--keyserver', 'hkp://keyserver.ubuntu.com:80', info['signing_key_fingerprint']]
-                    self.add_ppa_signing_keys_callback(command)
+            info = self._get_ppa_info(ppa_owner, ppa_name)
 
+            # add gpg sig if needed
+            if not self._key_already_exists(info['signing_key_fingerprint']):
+
+                # TODO: report file that would have been added if not check_mode
+                keyfile = ''
+                if not self.module.check_mode:
+                    if self.apt_key_bin:
+                        command = [self.apt_key_bin, 'adv', '--recv-keys', '--no-tty', '--keyserver', 'hkp://keyserver.ubuntu.com:80',
+                                   info['signing_key_fingerprint']]
+                    else:
+                        # use first available key dir, in order of preference
+                        for keydir in APT_KEY_DIRS:
+                            if os.path.exists(keydir):
+                                break
+                        else:
+                            self.module.fail_json("Unable to find any existing apt gpgp repo directories, tried the following: %s" % ', '.join(APT_KEY_DIRS))
+
+                        keyfile = '%s/%s-%s-%s.gpg' % (keydir, os.path.basename(source).replace(' ', '-'), ppa_owner, ppa_name)
+                        command = [self.gpg_bin, '--no-tty', '--keyserver', 'hkp://keyserver.ubuntu.com:80', '--export', info['signing_key_fingerprint']]
+
+                    rc, stdout, stderr = self.module.run_command(command, check_rc=True, encoding=None)
+                    if keyfile:
+                        # using gpg we must write keyfile ourselves
+                        if len(stdout) == 0:
+                            self.module.fail_json(msg='Unable to get required signing key', rc=rc, stderr=stderr, command=command)
+                        try:
+                            with open(keyfile, 'wb') as f:
+                                f.write(stdout)
+                            self.module.log('Added repo key "%s" for apt to file "%s"' % (info['signing_key_fingerprint'], keyfile))
+                        except (OSError, IOError) as e:
+                            self.module.fail_json(msg='Unable to add required signing key for%s ', rc=rc, stderr=stderr, error=to_native(e))
+
+            # apt source file
             file = file or self._suggest_filename('%s_%s' % (line, self.codename))
         else:
             source = self._parse(line, raise_if_invalid_or_disabled=True)[2]
             file = file or self._suggest_filename(source)
+
         self._add_valid_source(source, comment, file)
 
     def remove_source(self, line):
@@ -495,16 +578,6 @@ class UbuntuSourcesList(SourcesList):
                     _repositories.append(source_line)
 
         return _repositories
-
-
-def get_add_ppa_signing_key_callback(module):
-    def _run_command(command):
-        module.run_command(command, check_rc=True)
-
-    if module.check_mode:
-        return None
-    else:
-        return _run_command
 
 
 def revert_sources_list(sources_before, sources_after, sourceslist_before):
@@ -597,7 +670,7 @@ def main():
         module.fail_json(msg='Please set argument \'repo\' to a non-empty value')
 
     if isinstance(distro, aptsources_distro.Distribution):
-        sourceslist = UbuntuSourcesList(module, add_ppa_signing_keys_callback=get_add_ppa_signing_key_callback(module))
+        sourceslist = UbuntuSourcesList(module)
     else:
         module.fail_json(msg='Module apt_repository is not supported on target.')
 
@@ -609,8 +682,8 @@ def main():
             sourceslist.add_source(repo)
         elif state == 'absent':
             sourceslist.remove_source(repo)
-    except InvalidSource as err:
-        module.fail_json(msg='Invalid repository string: %s' % to_native(err))
+    except InvalidSource as ex:
+        module.fail_json(msg='Invalid repository string: %s' % to_native(ex))
 
     sources_after = sourceslist.dump()
     changed = sources_before != sources_after
@@ -651,9 +724,9 @@ def main():
                     revert_sources_list(sources_before, sources_after, sourceslist_before)
                     module.fail_json(msg='Failed to update apt cache: %s' % (err if err else 'unknown reason'))
 
-        except (OSError, IOError) as err:
+        except (OSError, IOError) as ex:
             revert_sources_list(sources_before, sources_after, sourceslist_before)
-            module.fail_json(msg=to_native(err))
+            module.fail_json(msg=to_native(ex))
 
     module.exit_json(changed=changed, repo=repo, state=state, diff=diff)
 

@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright: (c) 2013, Evan Kaufman <evan@digitalflophouse.com
@@ -14,8 +13,21 @@ DOCUMENTATION = r'''
 module: replace
 author: Evan Kaufman (@EvanK)
 extends_documentation_fragment:
+    - action_common_attributes
+    - action_common_attributes.files
     - files
     - validate
+attributes:
+    check_mode:
+        support: full
+    diff_mode:
+        support: full
+    platform:
+        platforms: posix
+    safe_file_operations:
+        support: full
+    vault:
+        support: none
 short_description: Replace all instances of a particular string in a
                    file using a back-referenced regular expression
 description:
@@ -35,7 +47,7 @@ options:
     description:
       - The regular expression to look for in the contents of the file.
       - Uses Python regular expressions; see
-        U(http://docs.python.org/2/library/re.html).
+        U(https://docs.python.org/3/library/re.html).
       - Uses MULTILINE mode, which means C(^) and C($) match the beginning
         and end of the file, as well as the beginning and end respectively
         of I(each line) of the file.
@@ -55,12 +67,13 @@ options:
       - If not set, matches are removed entirely.
       - Backreferences can be used ambiguously like C(\1), or explicitly like C(\g<1>).
     type: str
+    default: ''
   after:
     description:
       - If specified, only content after this match will be replaced/removed.
       - Can be used in combination with C(before).
       - Uses Python regular expressions; see
-        U(http://docs.python.org/2/library/re.html).
+        U(https://docs.python.org/3/library/re.html).
       - Uses DOTALL, which means the C(.) special character I(can match newlines).
     type: str
     version_added: "2.4"
@@ -69,7 +82,7 @@ options:
       - If specified, only content before this match will be replaced/removed.
       - Can be used in combination with C(after).
       - Uses Python regular expressions; see
-        U(http://docs.python.org/2/library/re.html).
+        U(https://docs.python.org/3/library/re.html).
       - Uses DOTALL, which means the C(.) special character I(can match newlines).
     type: str
     version_added: "2.4"
@@ -95,11 +108,10 @@ notes:
     previous incorrect behavior, you may be need to adjust your tasks.
     See U(https://github.com/ansible/ansible/issues/31354) for details.
   - Option I(follow) has been removed in Ansible 2.5, because this module modifies the contents of the file so I(follow=no) doesn't make sense.
-  - Supports C(check_mode).
 '''
 
 EXAMPLES = r'''
-- name: Before Ansible 2.3, option 'dest', 'destfile' or 'name' was used instead of 'path'
+- name: Replace old hostname with new hostname (requires Ansible >= 2.4)
   ansible.builtin.replace:
     path: /etc/hosts
     regexp: '(\s+)old\.host\.name(\s+.*)?$'
@@ -171,6 +183,7 @@ RETURN = r'''#'''
 import os
 import re
 import tempfile
+from traceback import format_exc
 
 from ansible.module_utils._text import to_text, to_bytes
 from ansible.module_utils.basic import AnsibleModule
@@ -229,7 +242,7 @@ def main():
     params = module.params
     path = params['path']
     encoding = params['encoding']
-    res_args = dict()
+    res_args = dict(rc=0)
 
     params['after'] = to_text(params['after'], errors='surrogate_or_strict', nonstring='passthru')
     params['before'] = to_text(params['before'], errors='surrogate_or_strict', nonstring='passthru')
@@ -242,9 +255,12 @@ def main():
     if not os.path.exists(path):
         module.fail_json(rc=257, msg='Path %s does not exist !' % path)
     else:
-        f = open(path, 'rb')
-        contents = to_text(f.read(), errors='surrogate_or_strict', encoding=encoding)
-        f.close()
+        try:
+            with open(path, 'rb') as f:
+                contents = to_text(f.read(), errors='surrogate_or_strict', encoding=encoding)
+        except (OSError, IOError) as e:
+            module.fail_json(msg='Unable to read the contents of %s: %s' % (path, to_text(e)),
+                             exception=format_exc())
 
     pattern = u''
     if params['after'] and params['before']:

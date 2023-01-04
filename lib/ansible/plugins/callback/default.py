@@ -14,6 +14,7 @@ DOCUMENTATION = '''
         - This is the default output callback for ansible-playbook.
     extends_documentation_fragment:
       - default_callback
+      - result_format_callback
     requirements:
       - set as stdout in configuration
 '''
@@ -24,22 +25,7 @@ from ansible import context
 from ansible.playbook.task_include import TaskInclude
 from ansible.plugins.callback import CallbackBase
 from ansible.utils.color import colorize, hostcolor
-
-# These values use ansible.constants for historical reasons, mostly to allow
-# unmodified derivative plugins to work. However, newer options added to the
-# plugin are not also added to ansible.constants, so authors of derivative
-# callback plugins will eventually need to add a reference to the common docs
-# fragment for the 'default' callback plugin
-
-# these are used to provide backwards compat with old plugins that subclass from default
-# but still don't use the new config system and/or fail to document the options
-# TODO: Change the default of check_mode_markers to True in a future release (2.13)
-COMPAT_OPTIONS = (('display_skipped_hosts', C.DISPLAY_SKIPPED_HOSTS),
-                  ('display_ok_hosts', True),
-                  ('show_custom_stats', C.SHOW_CUSTOM_STATS),
-                  ('display_failed_stderr', False),
-                  ('check_mode_markers', False),
-                  ('show_per_host_start', False))
+from ansible.utils.fqcn import add_internal_fqcns
 
 
 class CallbackModule(CallbackBase):
@@ -61,53 +47,32 @@ class CallbackModule(CallbackBase):
         self._task_type_cache = {}
         super(CallbackModule, self).__init__()
 
-    def set_options(self, task_keys=None, var_options=None, direct=None):
-
-        super(CallbackModule, self).set_options(task_keys=task_keys, var_options=var_options, direct=direct)
-
-        # for backwards compat with plugins subclassing default, fallback to constants
-        for option, constant in COMPAT_OPTIONS:
-            try:
-                value = self.get_option(option)
-            except (AttributeError, KeyError):
-                self._display.deprecated("'%s' is subclassing DefaultCallback without the corresponding doc_fragment." % self._load_name,
-                                         version='2.14', collection_name='ansible.builtin')
-                value = constant
-            setattr(self, option, value)
-
     def v2_runner_on_failed(self, result, ignore_errors=False):
 
-        delegated_vars = result._result.get('_ansible_delegated_vars', None)
+        host_label = self.host_label(result)
         self._clean_results(result._result, result._task.action)
 
         if self._last_task_banner != result._task._uuid:
             self._print_task_banner(result._task)
 
-        self._handle_exception(result._result, use_stderr=self.display_failed_stderr)
+        self._handle_exception(result._result, use_stderr=self.get_option('display_failed_stderr'))
         self._handle_warnings(result._result)
 
         if result._task.loop and 'results' in result._result:
             self._process_items(result)
 
         else:
-            if delegated_vars:
-                if self._display.verbosity < 2 and self.get_option('show_task_path_on_failure'):
-                    self._print_task_path(result._task)
-                self._display.display("fatal: [%s -> %s]: FAILED! => %s" % (result._host.get_name(), delegated_vars['ansible_host'],
-                                                                            self._dump_results(result._result)),
-                                      color=C.COLOR_ERROR, stderr=self.display_failed_stderr)
-            else:
-                if self._display.verbosity < 2 and self.get_option('show_task_path_on_failure'):
-                    self._print_task_path(result._task)
-                self._display.display("fatal: [%s]: FAILED! => %s" % (result._host.get_name(), self._dump_results(result._result)),
-                                      color=C.COLOR_ERROR, stderr=self.display_failed_stderr)
+            if self._display.verbosity < 2 and self.get_option('show_task_path_on_failure'):
+                self._print_task_path(result._task)
+            msg = "fatal: [%s]: FAILED! => %s" % (host_label, self._dump_results(result._result))
+            self._display.display(msg, color=C.COLOR_ERROR, stderr=self.get_option('display_failed_stderr'))
 
         if ignore_errors:
             self._display.display("...ignoring", color=C.COLOR_SKIP)
 
     def v2_runner_on_ok(self, result):
 
-        delegated_vars = result._result.get('_ansible_delegated_vars', None)
+        host_label = self.host_label(result)
 
         if isinstance(result._task, TaskInclude):
             if self._last_task_banner != result._task._uuid:
@@ -117,22 +82,16 @@ class CallbackModule(CallbackBase):
             if self._last_task_banner != result._task._uuid:
                 self._print_task_banner(result._task)
 
-            if delegated_vars:
-                msg = "changed: [%s -> %s]" % (result._host.get_name(), delegated_vars['ansible_host'])
-            else:
-                msg = "changed: [%s]" % result._host.get_name()
+            msg = "changed: [%s]" % (host_label,)
             color = C.COLOR_CHANGED
         else:
-            if not self.display_ok_hosts:
+            if not self.get_option('display_ok_hosts'):
                 return
 
             if self._last_task_banner != result._task._uuid:
                 self._print_task_banner(result._task)
 
-            if delegated_vars:
-                msg = "ok: [%s -> %s]" % (result._host.get_name(), delegated_vars['ansible_host'])
-            else:
-                msg = "ok: [%s]" % result._host.get_name()
+            msg = "ok: [%s]" % (host_label,)
             color = C.COLOR_OK
 
         self._handle_warnings(result._result)
@@ -148,31 +107,31 @@ class CallbackModule(CallbackBase):
 
     def v2_runner_on_skipped(self, result):
 
-        if self.display_skipped_hosts:
+        if self.get_option('display_skipped_hosts'):
 
             self._clean_results(result._result, result._task.action)
 
             if self._last_task_banner != result._task._uuid:
                 self._print_task_banner(result._task)
 
-            if result._task.loop and 'results' in result._result:
+            if result._task.loop is not None and 'results' in result._result:
                 self._process_items(result)
-            else:
-                msg = "skipping: [%s]" % result._host.get_name()
-                if self._run_is_verbose(result):
-                    msg += " => %s" % self._dump_results(result._result)
-                self._display.display(msg, color=C.COLOR_SKIP)
+
+            msg = "skipping: [%s]" % result._host.get_name()
+            if self._run_is_verbose(result):
+                msg += " => %s" % self._dump_results(result._result)
+            self._display.display(msg, color=C.COLOR_SKIP)
 
     def v2_runner_on_unreachable(self, result):
         if self._last_task_banner != result._task._uuid:
             self._print_task_banner(result._task)
 
-        delegated_vars = result._result.get('_ansible_delegated_vars', None)
-        if delegated_vars:
-            msg = "fatal: [%s -> %s]: UNREACHABLE! => %s" % (result._host.get_name(), delegated_vars['ansible_host'], self._dump_results(result._result))
-        else:
-            msg = "fatal: [%s]: UNREACHABLE! => %s" % (result._host.get_name(), self._dump_results(result._result))
-        self._display.display(msg, color=C.COLOR_UNREACHABLE, stderr=self.display_failed_stderr)
+        host_label = self.host_label(result)
+        msg = "fatal: [%s]: UNREACHABLE! => %s" % (host_label, self._dump_results(result._result))
+        self._display.display(msg, color=C.COLOR_UNREACHABLE, stderr=self.get_option('display_failed_stderr'))
+
+        if result._task.ignore_unreachable:
+            self._display.display("...ignoring", color=C.COLOR_SKIP)
 
     def v2_playbook_on_no_hosts_matched(self):
         self._display.display("skipping: no hosts matched", color=C.COLOR_SKIP)
@@ -192,7 +151,7 @@ class CallbackModule(CallbackBase):
 
         # Preserve task name, as all vars may not be available for templating
         # when we need it later
-        if self._play.strategy in ('free', 'host_pinned'):
+        if self._play.strategy in add_internal_fqcns(('free', 'host_pinned')):
             # Explicitly set to None for strategy free/host_pinned to account for any cached
             # task title from a previous non-free play
             self._last_task_name = None
@@ -200,7 +159,7 @@ class CallbackModule(CallbackBase):
             self._last_task_name = task.get_name().strip()
 
             # Display the task banner immediately if we're not doing any filtering based on task result
-            if self.display_skipped_hosts and self.display_ok_hosts:
+            if self.get_option('display_skipped_hosts') and self.get_option('display_ok_hosts'):
                 self._print_task_banner(task)
 
     def _print_task_banner(self, task):
@@ -224,7 +183,7 @@ class CallbackModule(CallbackBase):
         if task_name is None:
             task_name = task.get_name().strip()
 
-        if task.check_mode and self.check_mode_markers:
+        if task.check_mode and self.get_option('check_mode_markers'):
             checkmsg = " [CHECK MODE]"
         else:
             checkmsg = ""
@@ -247,7 +206,7 @@ class CallbackModule(CallbackBase):
 
     def v2_playbook_on_play_start(self, play):
         name = play.get_name().strip()
-        if play.check_mode and self.check_mode_markers:
+        if play.check_mode and self.get_option('check_mode_markers'):
             checkmsg = " [CHECK MODE]"
         else:
             checkmsg = ""
@@ -278,7 +237,7 @@ class CallbackModule(CallbackBase):
 
     def v2_runner_item_on_ok(self, result):
 
-        delegated_vars = result._result.get('_ansible_delegated_vars', None)
+        host_label = self.host_label(result)
         if isinstance(result._task, TaskInclude):
             return
         elif result._result.get('changed', False):
@@ -288,7 +247,7 @@ class CallbackModule(CallbackBase):
             msg = 'changed'
             color = C.COLOR_CHANGED
         else:
-            if not self.display_ok_hosts:
+            if not self.get_option('display_ok_hosts'):
                 return
 
             if self._last_task_banner != result._task._uuid:
@@ -297,13 +256,7 @@ class CallbackModule(CallbackBase):
             msg = 'ok'
             color = C.COLOR_OK
 
-        if delegated_vars:
-            msg += ": [%s -> %s]" % (result._host.get_name(), delegated_vars['ansible_host'])
-        else:
-            msg += ": [%s]" % result._host.get_name()
-
-        msg += " => (item=%s)" % (self._get_item_label(result._result),)
-
+        msg = "%s: [%s] => (item=%s)" % (msg, host_label, self._get_item_label(result._result))
         self._clean_results(result._result, result._task.action)
         if self._run_is_verbose(result):
             msg += " => %s" % self._dump_results(result._result)
@@ -313,21 +266,20 @@ class CallbackModule(CallbackBase):
         if self._last_task_banner != result._task._uuid:
             self._print_task_banner(result._task)
 
-        delegated_vars = result._result.get('_ansible_delegated_vars', None)
+        host_label = self.host_label(result)
         self._clean_results(result._result, result._task.action)
-        self._handle_exception(result._result)
+        self._handle_exception(result._result, use_stderr=self.get_option('display_failed_stderr'))
 
-        msg = "failed: "
-        if delegated_vars:
-            msg += "[%s -> %s]" % (result._host.get_name(), delegated_vars['ansible_host'])
-        else:
-            msg += "[%s]" % (result._host.get_name())
-
+        msg = "failed: [%s]" % (host_label,)
         self._handle_warnings(result._result)
-        self._display.display(msg + " (item=%s) => %s" % (self._get_item_label(result._result), self._dump_results(result._result)), color=C.COLOR_ERROR)
+        self._display.display(
+            msg + " (item=%s) => %s" % (self._get_item_label(result._result), self._dump_results(result._result)),
+            color=C.COLOR_ERROR,
+            stderr=self.get_option('display_failed_stderr')
+        )
 
     def v2_runner_item_on_skipped(self, result):
-        if self.display_skipped_hosts:
+        if self.get_option('display_skipped_hosts'):
             if self._last_task_banner != result._task._uuid:
                 self._print_task_banner(result._task)
 
@@ -382,7 +334,7 @@ class CallbackModule(CallbackBase):
         self._display.display("", screen_only=True)
 
         # print custom stats if required
-        if stats.custom and self.show_custom_stats:
+        if stats.custom and self.get_option('show_custom_stats'):
             self._display.banner("CUSTOM STATS: ")
             # per host
             # TODO: come up with 'pretty format'
@@ -397,7 +349,7 @@ class CallbackModule(CallbackBase):
                 self._display.display('\tRUN: %s' % self._dump_results(stats.custom['_run'], indent=1).replace('\n', ''))
             self._display.display("", screen_only=True)
 
-        if context.CLIARGS['check'] and self.check_mode_markers:
+        if context.CLIARGS['check'] and self.get_option('check_mode_markers'):
             self._display.banner("DRY RUN")
 
     def v2_playbook_on_start(self, playbook):
@@ -416,12 +368,13 @@ class CallbackModule(CallbackBase):
                 if val:
                     self._display.display('%s: %s' % (argument, val), color=C.COLOR_VERBOSE, screen_only=True)
 
-        if context.CLIARGS['check'] and self.check_mode_markers:
+        if context.CLIARGS['check'] and self.get_option('check_mode_markers'):
             self._display.banner("DRY RUN")
 
     def v2_runner_retry(self, result):
         task_name = result.task_name or result._task
-        msg = "FAILED - RETRYING: %s (%d retries left)." % (task_name, result._result['retries'] - result._result['attempts'])
+        host_label = self.host_label(result)
+        msg = "FAILED - RETRYING: [%s]: %s (%d retries left)." % (host_label, task_name, result._result['retries'] - result._result['attempts'])
         if self._run_is_verbose(result, verbosity=2):
             msg += "Result was: %s" % self._dump_results(result._result)
         self._display.display(msg, color=C.COLOR_DEBUG)
@@ -435,6 +388,21 @@ class CallbackModule(CallbackBase):
             'ASYNC POLL on %s: jid=%s started=%s finished=%s' % (host, jid, started, finished),
             color=C.COLOR_DEBUG
         )
+
+    def v2_runner_on_async_ok(self, result):
+        host = result._host.get_name()
+        jid = result._result.get('ansible_job_id')
+        self._display.display("ASYNC OK on %s: jid=%s" % (host, jid), color=C.COLOR_DEBUG)
+
+    def v2_runner_on_async_failed(self, result):
+        host = result._host.get_name()
+
+        # Attempt to get the async job ID. If the job does not finish before the
+        # async timeout value, the ID may be within the unparsed 'async_result' dict.
+        jid = result._result.get('ansible_job_id')
+        if not jid and 'async_result' in result._result:
+            jid = result._result['async_result'].get('ansible_job_id')
+        self._display.display("ASYNC FAILED on %s: jid=%s" % (host, jid), color=C.COLOR_DEBUG)
 
     def v2_playbook_on_notify(self, handler, host):
         if self._display.verbosity > 1:

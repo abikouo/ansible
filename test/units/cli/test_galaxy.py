@@ -41,7 +41,7 @@ from ansible.module_utils._text import to_bytes, to_native, to_text
 from ansible.utils import context_objects as co
 from ansible.utils.display import Display
 from units.compat import unittest
-from units.compat.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 
 @pytest.fixture(autouse='function')
@@ -324,15 +324,6 @@ class ValidRoleTests(object):
         for d in self.expected_role_dirs:
             self.assertTrue(os.path.isdir(os.path.join(self.role_dir, d)), msg="Expected role subdirectory {0} doesn't exist".format(d))
 
-    def test_travis_yml(self):
-        with open(os.path.join(self.role_dir, '.travis.yml'), 'r') as f:
-            contents = f.read()
-
-        with open(os.path.join(self.role_skeleton_path, '.travis.yml'), 'r') as f:
-            expected_contents = f.read()
-
-        self.assertEqual(expected_contents, contents, msg='.travis.yml does not match expected')
-
     def test_readme_contents(self):
         with open(os.path.join(self.role_dir, 'README.md'), 'r') as readme:
             contents = readme.read()
@@ -462,13 +453,7 @@ class TestGalaxyInitSkeleton(unittest.TestCase, ValidRoleTests):
 @pytest.mark.parametrize('cli_args, expected', [
     (['ansible-galaxy', 'collection', 'init', 'abc._def'], 0),
     (['ansible-galaxy', 'collection', 'init', 'abc._def', '-vvv'], 3),
-    (['ansible-galaxy', '-vv', 'collection', 'init', 'abc._def'], 2),
-    # Due to our manual parsing we want to verify that -v set in the sub parser takes precedence. This behaviour is
-    # deprecated and tests should be removed when the code that handles it is removed
-    (['ansible-galaxy', '-vv', 'collection', 'init', 'abc._def', '-v'], 1),
-    (['ansible-galaxy', '-vv', 'collection', 'init', 'abc._def', '-vvvv'], 4),
-    (['ansible-galaxy', '-vvv', 'init', 'name'], 3),
-    (['ansible-galaxy', '-vvvvv', 'init', '-v', 'name'], 1),
+    (['ansible-galaxy', 'collection', 'init', 'abc._def', '-vv'], 2),
 ])
 def test_verbosity_arguments(cli_args, expected, monkeypatch):
     # Mock out the functions so we don't actually execute anything
@@ -637,7 +622,7 @@ def test_invalid_collection_name_install(name, expected, tmp_path_factory):
     # Used to be: expected = "Invalid collection name '%s', name must be in the format <namespace>.<collection>" % expected
     expected = "Neither the collection requirement entry key 'name', nor 'source' point to a concrete resolvable collection artifact. "
     expected += r"Also 'name' is not an FQCN\. A valid collection name must be in the format <namespace>\.<collection>\. "
-    expected += r"Please make sure that the namespace and the collection name  contain characters from \[a\-zA\-Z0\-9_\] only\."
+    expected += r"Please make sure that the namespace and the collection name contain characters from \[a\-zA\-Z0\-9_\] only\."
 
     gc = GalaxyCLI(args=['ansible-galaxy', 'collection', 'install', name, '-p', os.path.join(install_path, 'install')])
     with pytest.raises(AnsibleError, match=expected):
@@ -655,7 +640,7 @@ def test_collection_build(collection_artifact):
         tar_members = tar.getmembers()
 
         valid_files = ['MANIFEST.json', 'FILES.json', 'roles', 'docs', 'plugins', 'plugins/README.md', 'README.md',
-                       'runme.sh']
+                       'runme.sh', 'meta', 'meta/runtime.yml']
         assert len(tar_members) == len(valid_files)
 
         # Verify the uid and gid is 0 and the correct perms are set
@@ -711,16 +696,16 @@ def test_collection_build(collection_artifact):
         finally:
             files_file.close()
 
-        assert len(files['files']) == 7
+        assert len(files['files']) == 9
         assert files['format'] == 1
         assert len(files.keys()) == 2
 
-        valid_files_entries = ['.', 'roles', 'docs', 'plugins', 'plugins/README.md', 'README.md', 'runme.sh']
+        valid_files_entries = ['.', 'roles', 'docs', 'plugins', 'plugins/README.md', 'README.md', 'runme.sh', 'meta', 'meta/runtime.yml']
         for file_entry in files['files']:
             assert file_entry['name'] in valid_files_entries
             assert file_entry['format'] == 1
 
-            if file_entry['name'] in ['plugins/README.md', 'runme.sh']:
+            if file_entry['name'] in ['plugins/README.md', 'runme.sh', 'meta/runtime.yml']:
                 assert file_entry['ftype'] == 'file'
                 assert file_entry['chksum_type'] == 'sha256'
                 # Can't test the actual checksum as the html link changes based on the version or the file contents
@@ -1099,7 +1084,7 @@ def test_parse_requirements_without_mandatory_name_key(requirements_cli, require
 
     expected = "Neither the collection requirement entry key 'name', nor 'source' point to a concrete resolvable collection artifact. "
     expected += r"Also 'name' is not an FQCN\. A valid collection name must be in the format <namespace>\.<collection>\. "
-    expected += r"Please make sure that the namespace and the collection name  contain characters from \[a\-zA\-Z0\-9_\] only\."
+    expected += r"Please make sure that the namespace and the collection name contain characters from \[a\-zA\-Z0\-9_\] only\."
 
     with pytest.raises(AnsibleError, match=expected):
         requirements_cli._parse_requirements_file(requirements_file)

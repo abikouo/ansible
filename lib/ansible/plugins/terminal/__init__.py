@@ -21,13 +21,12 @@ __metaclass__ = type
 
 import re
 
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 
 from ansible.errors import AnsibleConnectionFailure
-from ansible.module_utils.six import with_metaclass
 
 
-class TerminalBase(with_metaclass(ABCMeta, object)):
+class TerminalBase(ABC):
     '''
     A base class for implementing cli connections
 
@@ -41,10 +40,10 @@ class TerminalBase(with_metaclass(ABCMeta, object)):
     '''
 
     #: compiled bytes regular expressions as stdout
-    terminal_stdout_re = []
+    terminal_stdout_re = []  # type: list[re.Pattern]
 
     #: compiled bytes regular expressions as stderr
-    terminal_stderr_re = []
+    terminal_stderr_re = []  # type: list[re.Pattern]
 
     #: compiled bytes regular expressions to remove ANSI codes
     ansi_re = [

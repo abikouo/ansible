@@ -23,10 +23,10 @@
 # modules
 #
 # example:
-#    ./hacking/test-module.py -m lib/ansible/modules/commands/command.py -a "/bin/sleep 3"
-#    ./hacking/test-module.py -m lib/ansible/modules/commands/command.py -a "/bin/sleep 3" --debugger /usr/bin/pdb
-#    ./hacking/test-module.py -m lib/ansible/modules/files/lineinfile.py -a "dest=/etc/exports line='/srv/home hostname1(rw,sync)'" --check
-#    ./hacking/test-module.py -m lib/ansible/modules/commands/command.py -a "echo hello" -n -o "test_hello"
+#    ./hacking/test-module.py -m lib/ansible/modules/command.py -a "/bin/sleep 3"
+#    ./hacking/test-module.py -m lib/ansible/modules/command.py -a "/bin/sleep 3" --debugger /usr/bin/pdb
+#    ./hacking/test-module.py -m lib/ansible/modules/lineinfile.py -a "dest=/etc/exports line='/srv/home hostname1(rw,sync)'" --check
+#    ./hacking/test-module.py -m lib/ansible/modules/command.py -a "echo hello" -n -o "test_hello"
 
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
@@ -44,7 +44,7 @@ import ansible.utils.vars as utils_vars
 from ansible.parsing.dataloader import DataLoader
 from ansible.parsing.utils.jsonify import jsonify
 from ansible.parsing.splitter import parse_kv
-import ansible.executor.module_common as module_common
+from ansible.executor import module_common
 import ansible.constants as C
 from ansible.module_utils._text import to_native, to_text
 from ansible.template import Templar

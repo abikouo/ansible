@@ -64,16 +64,18 @@ except ImportError:
     HAS_SYSLOG = False
 
 try:
-    from systemd import journal
+    from systemd import journal, daemon as systemd_daemon
     # Makes sure that systemd.journal has method sendv()
     # Double check that journal has method sendv (some packages don't)
-    has_journal = hasattr(journal, 'sendv')
-except ImportError:
+    # check if the system is running under systemd
+    has_journal = hasattr(journal, 'sendv') and systemd_daemon.booted()
+except (ImportError, AttributeError):
+    # AttributeError would be caused from use of .booted() if wrong systemd
     has_journal = False
 
 HAVE_SELINUX = False
 try:
-    import ansible.module_utils.compat.selinux as selinux
+    from ansible.module_utils.compat import selinux
     HAVE_SELINUX = True
 except ImportError:
     pass
@@ -141,6 +143,7 @@ from ansible.module_utils.common._collections_compat import (
     Sequence, MutableSequence,
     Set, MutableSet,
 )
+from ansible.module_utils.common.locale import get_best_parsable_locale
 from ansible.module_utils.common.process import get_bin_path
 from ansible.module_utils.common.file import (
     _PERM_BITS as PERM_BITS,
@@ -200,14 +203,14 @@ imap = map
 
 try:
     # Python 2
-    unicode
+    unicode  # type: ignore[has-type]  # pylint: disable=used-before-assignment
 except NameError:
     # Python 3
     unicode = text_type
 
 try:
     # Python 2
-    basestring
+    basestring  # type: ignore[has-type]  # pylint: disable=used-before-assignment
 except NameError:
     # Python 3
     basestring = string_types
@@ -247,13 +250,13 @@ PERMS_RE = re.compile(r'[^rwxXstugo]')
 
 # Used for determining if the system is running a new enough python version
 # and should only restrict on our documented minimum versions
-_PY3_MIN = sys.version_info[:2] >= (3, 5)
-_PY2_MIN = (2, 6) <= sys.version_info[:2] < (3,)
+_PY3_MIN = sys.version_info >= (3, 5)
+_PY2_MIN = (2, 7) <= sys.version_info < (3,)
 _PY_MIN = _PY3_MIN or _PY2_MIN
 if not _PY_MIN:
     print(
         '\n{"failed": true, '
-        '"msg": "Ansible requires a minimum of Python2 version 2.6 or Python3 version 3.5. Current version: %s"}' % ''.join(sys.version.splitlines())
+        '"msg": "ansible-core requires a minimum of Python2 version 2.7 or Python3 version 3.5. Current version: %s"}' % ''.join(sys.version.splitlines())
     )
     sys.exit(1)
 
@@ -341,7 +344,7 @@ def heuristic_log_sanitize(data, no_log_values=None):
                 if begin == 0:
                     # Searched the whole string so there's no password
                     # here.  Return the remaining data
-                    output.insert(0, data[0:begin])
+                    output.insert(0, data[0:prev_begin])
                     break
                 # Search for a different beginning of the password field.
                 sep_search_end = begin
@@ -499,6 +502,7 @@ class AnsibleModule(object):
         self.validation_result = self.validator.validate(self.params)
         self.params.update(self.validation_result.validated_parameters)
         self.no_log_values.update(self.validation_result._no_log_values)
+        self.aliases.update(self.validation_result._aliases)
 
         try:
             error = self.validation_result.errors[0]
@@ -882,10 +886,11 @@ class AnsibleModule(object):
         b_path = to_bytes(path, errors='surrogate_or_strict')
         if expand:
             b_path = os.path.expanduser(os.path.expandvars(b_path))
-        path_stat = os.lstat(b_path)
 
         if self.check_file_absent_if_check_mode(b_path):
             return True
+
+        path_stat = os.lstat(b_path)
 
         if not isinstance(mode, int):
             try:
@@ -1101,7 +1106,7 @@ class AnsibleModule(object):
         rev_umask = umask ^ PERM_BITS
 
         # Permission bits constants documented at:
-        # http://docs.python.org/2/library/stat.html#stat.S_ISUID
+        # https://docs.python.org/3/library/stat.html#stat.S_ISUID
         if apply_X_permission:
             X_perms = {
                 'u': {'X': stat.S_IXUSR},
@@ -1232,13 +1237,16 @@ class AnsibleModule(object):
             # as it would be returned by locale.getdefaultlocale()
             locale.setlocale(locale.LC_ALL, '')
         except locale.Error:
-            # fallback to the 'C' locale, which may cause unicode
-            # issues but is preferable to simply failing because
-            # of an unknown locale
-            locale.setlocale(locale.LC_ALL, 'C')
-            os.environ['LANG'] = 'C'
-            os.environ['LC_ALL'] = 'C'
-            os.environ['LC_MESSAGES'] = 'C'
+            # fallback to the 'best' locale, per the function
+            # final fallback is 'C', which may cause unicode issues
+            # but is preferable to simply failing on unknown locale
+            best_locale = get_best_parsable_locale(self)
+
+            # need to set several since many tools choose to ignore documented precedence and scope
+            locale.setlocale(locale.LC_ALL, best_locale)
+            os.environ['LANG'] = best_locale
+            os.environ['LC_ALL'] = best_locale
+            os.environ['LC_MESSAGES'] = best_locale
         except Exception as e:
             self.fail_json(msg="An unknown error was encountered while attempting to validate the locale: %s" %
                            to_native(e), exception=traceback.format_exc())
@@ -1329,7 +1337,16 @@ class AnsibleModule(object):
             if has_journal:
                 journal_args = [("MODULE", os.path.basename(__file__))]
                 for arg in log_args:
-                    journal_args.append((arg.upper(), str(log_args[arg])))
+                    name, value = (arg.upper(), str(log_args[arg]))
+                    if name in (
+                        'PRIORITY', 'MESSAGE', 'MESSAGE_ID',
+                        'CODE_FILE', 'CODE_LINE', 'CODE_FUNC',
+                        'SYSLOG_FACILITY', 'SYSLOG_IDENTIFIER',
+                        'SYSLOG_PID',
+                    ):
+                        name = "_%s" % name
+                    journal_args.append((name, value))
+
                 try:
                     if HAS_SYSLOG:
                         # If syslog_facility specified, it needs to convert
@@ -1823,7 +1840,7 @@ class AnsibleModule(object):
 
     def run_command(self, args, check_rc=False, close_fds=True, executable=None, data=None, binary_data=False, path_prefix=None, cwd=None,
                     use_unsafe_shell=False, prompt_regex=None, environ_update=None, umask=None, encoding='utf-8', errors='surrogate_or_strict',
-                    expand_user_and_vars=True, pass_fds=None, before_communicate_callback=None, ignore_invalid_cwd=True):
+                    expand_user_and_vars=True, pass_fds=None, before_communicate_callback=None, ignore_invalid_cwd=True, handle_exceptions=True):
         '''
         Execute a command, returns rc, stdout, and stderr.
 
@@ -1845,7 +1862,7 @@ class AnsibleModule(object):
         :kw prompt_regex: Regex string (not a compiled regex) which can be
             used to detect prompts in the stdout which would otherwise cause
             the execution to hang (especially if no input data is specified)
-        :kw environ_update: dictionary to *update* os.environ with
+        :kw environ_update: dictionary to *update* environ variables with
         :kw umask: Umask to be used when running the command. Default None
         :kw encoding: Since we return native strings, on python3 we need to
             know the encoding to use to transform from bytes to text.  If you
@@ -1877,6 +1894,9 @@ class AnsibleModule(object):
         :kw ignore_invalid_cwd: This flag indicates whether an invalid ``cwd``
             (non-existent or not a directory) should be ignored or should raise
             an exception.
+        :kw handle_exceptions: This flag indicates whether an exception will
+            be handled inline and issue a failed_json or if the caller should
+            handle it.
         :returns: A 3-tuple of return code (integer), stdout (native string),
             and stderr (native string).  On python2, stdout and stderr are both
             byte strings.  On python3, stdout and stderr are text strings converted
@@ -1940,23 +1960,16 @@ class AnsibleModule(object):
         msg = None
         st_in = None
 
-        # Manipulate the environ we'll send to the new process
-        old_env_vals = {}
+        env = os.environ.copy()
         # We can set this from both an attribute and per call
-        for key, val in self.run_command_environ_update.items():
-            old_env_vals[key] = os.environ.get(key, None)
-            os.environ[key] = val
-        if environ_update:
-            for key, val in environ_update.items():
-                old_env_vals[key] = os.environ.get(key, None)
-                os.environ[key] = val
+        env.update(self.run_command_environ_update or {})
+        env.update(environ_update or {})
         if path_prefix:
-            path = os.environ.get('PATH', '')
-            old_env_vals['PATH'] = path
+            path = env.get('PATH', '')
             if path:
-                os.environ['PATH'] = "%s:%s" % (path_prefix, path)
+                env['PATH'] = "%s:%s" % (path_prefix, path)
             else:
-                os.environ['PATH'] = path_prefix
+                env['PATH'] = path_prefix
 
         # If using test-module.py and explode, the remote lib path will resemble:
         #   /tmp/test_module_scratch/debug_dir/ansible/module_utils/basic.py
@@ -1964,17 +1977,21 @@ class AnsibleModule(object):
         #   /tmp/ansible_vmweLQ/ansible_modlib.zip/ansible/module_utils/basic.py
 
         # Clean out python paths set by ansiballz
-        if 'PYTHONPATH' in os.environ:
-            pypaths = os.environ['PYTHONPATH'].split(':')
-            pypaths = [x for x in pypaths
-                       if not x.endswith('/ansible_modlib.zip') and
+        if 'PYTHONPATH' in env:
+            pypaths = [x for x in env['PYTHONPATH'].split(':')
+                       if x and
+                       not x.endswith('/ansible_modlib.zip') and
                        not x.endswith('/debug_dir')]
-            os.environ['PYTHONPATH'] = ':'.join(pypaths)
-            if not os.environ['PYTHONPATH']:
-                del os.environ['PYTHONPATH']
+            if pypaths and any(pypaths):
+                env['PYTHONPATH'] = ':'.join(pypaths)
 
         if data:
             st_in = subprocess.PIPE
+
+        def preexec():
+            self._restore_signal_handlers()
+            if umask:
+                os.umask(umask)
 
         kwargs = dict(
             executable=executable,
@@ -1983,32 +2000,21 @@ class AnsibleModule(object):
             stdin=st_in,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            preexec_fn=self._restore_signal_handlers,
+            preexec_fn=preexec,
+            env=env,
         )
         if PY3 and pass_fds:
             kwargs["pass_fds"] = pass_fds
         elif PY2 and pass_fds:
             kwargs['close_fds'] = False
 
-        # store the pwd
-        prev_dir = os.getcwd()
-
         # make sure we're in the right working directory
         if cwd:
+            cwd = to_bytes(os.path.abspath(os.path.expanduser(cwd)), errors='surrogate_or_strict')
             if os.path.isdir(cwd):
-                cwd = to_bytes(os.path.abspath(os.path.expanduser(cwd)), errors='surrogate_or_strict')
                 kwargs['cwd'] = cwd
-                try:
-                    os.chdir(cwd)
-                except (OSError, IOError) as e:
-                    self.fail_json(rc=e.errno, msg="Could not chdir to %s, %s" % (cwd, to_native(e)),
-                                   exception=traceback.format_exc())
             elif not ignore_invalid_cwd:
                 self.fail_json(msg="Provided cwd is not a valid directory: %s" % cwd)
-
-        old_umask = None
-        if umask:
-            old_umask = os.umask(umask)
 
         try:
             if self._debug:
@@ -2080,27 +2086,20 @@ class AnsibleModule(object):
             rc = cmd.returncode
         except (OSError, IOError) as e:
             self.log("Error Executing CMD:%s Exception:%s" % (self._clean_args(args), to_native(e)))
-            self.fail_json(rc=e.errno, stdout=b'', stderr=b'', msg=to_native(e), cmd=self._clean_args(args))
+            if handle_exceptions:
+                self.fail_json(rc=e.errno, stdout=b'', stderr=b'', msg=to_native(e), cmd=self._clean_args(args))
+            else:
+                raise e
         except Exception as e:
             self.log("Error Executing CMD:%s Exception:%s" % (self._clean_args(args), to_native(traceback.format_exc())))
-            self.fail_json(rc=257, stdout=b'', stderr=b'', msg=to_native(e), exception=traceback.format_exc(), cmd=self._clean_args(args))
-
-        # Restore env settings
-        for key, val in old_env_vals.items():
-            if val is None:
-                del os.environ[key]
+            if handle_exceptions:
+                self.fail_json(rc=257, stdout=b'', stderr=b'', msg=to_native(e), exception=traceback.format_exc(), cmd=self._clean_args(args))
             else:
-                os.environ[key] = val
-
-        if old_umask:
-            os.umask(old_umask)
+                raise e
 
         if rc != 0 and check_rc:
             msg = heuristic_log_sanitize(stderr.rstrip(), self.no_log_values)
             self.fail_json(cmd=self._clean_args(args), rc=rc, stdout=stdout, stderr=stderr, msg=msg)
-
-        # reset the pwd
-        os.chdir(prev_dir)
 
         if encoding is not None:
             return (rc, to_native(stdout, encoding=encoding, errors=errors),

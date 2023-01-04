@@ -18,6 +18,7 @@ DOCUMENTATION = """
         required: True
     notes:
       - Patterns are only supported on files, not directory/paths.
+      - See R(Ansible task paths,playbook_task_paths) to understand how file lookup occurs with paths.
       - Matching is against local system files on the Ansible controller.
         To iterate a list of files on a remote node, use the M(ansible.builtin.find) module.
       - Returns a string list of paths joined by commas, or an empty list if no files match. For a 'true list' pass C(wantlist=True) to the lookup.
@@ -25,10 +26,10 @@ DOCUMENTATION = """
 
 EXAMPLES = """
 - name: Display paths of all .txt files in dir
-  debug: msg={{ lookup('fileglob', '/my/path/*.txt') }}
+  ansible.builtin.debug: msg={{ lookup('ansible.builtin.fileglob', '/my/path/*.txt') }}
 
 - name: Copy each file over that matches the given pattern
-  copy:
+  ansible.builtin.copy:
     src: "{{ item }}"
     dest: "/etc/fooapp/"
     owner: "root"

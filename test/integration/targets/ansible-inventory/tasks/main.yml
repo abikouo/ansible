@@ -81,3 +81,67 @@
     that:
         - result is failed
         - '"ERROR! Could not match supplied host pattern, ignoring: invalid" in result.stderr'
+
+- name: "test json output with unicode characters"
+  command: ansible-inventory --list -i {{ role_path }}/files/unicode.yml
+  register: result
+
+- assert:
+    that:
+        - result is succeeded
+        - result.stdout is contains('příbor')
+
+- block:
+  - name: "test json output file with unicode characters"
+    command: ansible-inventory --list --output unicode_inventory.json -i {{ role_path }}/files/unicode.yml
+
+  - set_fact:
+      json_inventory_file: "{{ lookup('file', 'unicode_inventory.json') }}"
+
+  - assert:
+      that:
+          - json_inventory_file|string is contains('příbor')
+  always:
+    - file:
+        name: unicode_inventory.json
+        state: absent
+
+- name: "test yaml output with unicode characters"
+  command: ansible-inventory --list --yaml -i {{ role_path }}/files/unicode.yml
+  register: result
+
+- assert:
+    that:
+        - result is succeeded
+        - result.stdout is contains('příbor')
+
+- block:
+  - name: "test yaml output file with unicode characters"
+    command: ansible-inventory --list --yaml --output unicode_inventory.yaml -i {{ role_path }}/files/unicode.yml
+
+  - set_fact:
+      yaml_inventory_file: "{{ lookup('file', 'unicode_inventory.yaml') | string }}"
+
+  - assert:
+      that:
+          - yaml_inventory_file is contains('příbor')
+  always:
+    - file:
+        name: unicode_inventory.yaml
+        state: absent
+
+- include_tasks: toml.yml
+  loop:
+    -
+      - toml<0.10.0
+    -
+      - toml
+    -
+      - tomli
+      - tomli-w
+    -
+      - tomllib
+      - tomli-w
+  loop_control:
+    loop_var: toml_package
+  when: toml_package is not contains 'tomllib' or (toml_package is contains 'tomllib' and ansible_facts.python.version_info >= [3, 11])
