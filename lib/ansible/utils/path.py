@@ -14,26 +14,28 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import os
 import shutil
 
 from errno import EEXIST
 from ansible.errors import AnsibleError
-from ansible.module_utils._text import to_bytes, to_native, to_text
+from ansible.module_utils.common.text.converters import to_bytes, to_native, to_text
 
 
 __all__ = ['unfrackpath', 'makedirs_safe']
 
 
 def unfrackpath(path, follow=True, basedir=None):
-    '''
+    """
     Returns a path that is free of symlinks (if follow=True), environment variables, relative path traversals and symbols (~)
 
     :arg path: A byte or text string representing a path to be canonicalized
     :arg follow: A boolean to indicate of symlinks should be resolved or not
+    :arg basedir: A byte string, text string, PathLike object, or `None`
+        representing where a relative path should be resolved from.
+        `None` will be substituted for the current working directory.
     :raises UnicodeDecodeError: If the canonicalized version of the path
         contains non-utf8 byte sequences.
     :rtype: A text string (unicode on pyyhon2, str on python3).
@@ -42,7 +44,7 @@ def unfrackpath(path, follow=True, basedir=None):
 
     example::
         '$HOME/../../var/mail' becomes '/var/spool/mail'
-    '''
+    """
 
     b_basedir = to_bytes(basedir, errors='surrogate_or_strict', nonstring='passthru')
 
@@ -63,7 +65,7 @@ def unfrackpath(path, follow=True, basedir=None):
 
 
 def makedirs_safe(path, mode=None):
-    '''
+    """
     A *potentially insecure* way to ensure the existence of a directory chain. The "safe" in this function's name
     refers only to its ability to ignore `EEXIST` in the case of multiple callers operating on the same part of
     the directory chain. This function is not safe to use under world-writable locations when the first level of the
@@ -75,7 +77,7 @@ def makedirs_safe(path, mode=None):
     :kwarg mode: If given, the mode to set the directory to
     :raises AnsibleError: If the directory cannot be created and does not already exist.
     :raises UnicodeDecodeError: if the path is not decodable in the utf-8 encoding.
-    '''
+    """
 
     rpath = unfrackpath(path)
     b_rpath = to_bytes(rpath)

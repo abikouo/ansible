@@ -335,6 +335,27 @@
     that:
       - '"hElLo there"|regex_replace("hello", "hi", ignorecase=True) == "hi there"'
 
+- name: Verify regex_replace with count
+  assert:
+    that:
+      - '"foo=bar=baz"|regex_replace("=", ":", count=1) == "foo:bar=baz"'
+
+- name: Verify regex_replace with correct mandatory_count
+  assert:
+    that:
+      - '"foo=bar=baz"|regex_replace("=", ":", mandatory_count=2) == "foo:bar:baz"'
+
+- name: Verify regex_replace with incorrect mandatory_count
+  debug:
+    msg: "{{ 'foo=bar=baz'|regex_replace('=', ':', mandatory_count=1) }}"
+  ignore_errors: yes
+  register: incorrect_mandatory_count
+
+- assert:
+    that:
+      - "incorrect_mandatory_count is failed"
+      - "' times, but matches ' in incorrect_mandatory_count.msg"
+
 - name: Verify case-insensitive regex_findall
   assert:
     that:
@@ -447,12 +468,22 @@
 - name: Verify password_hash
   assert:
     that:
-      - "'what in the WORLD is up?'|password_hash|length == 120 or 'what in the WORLD is up?'|password_hash|length == 106"
+      - "'what in the WORLD is up?'|password_hash|length in (120, 106)"
       # This throws a vastly different error on py2 vs py3, so we just check
       # that it's a failure, not a substring of the exception.
       - password_hash_1 is failed
       - password_hash_2 is failed
-      - "'not support' in password_hash_2.msg"
+      - "'is not in the list of supported passlib algorithms' in password_hash_2.msg"
+
+- name: test using passlib with an unsupported hash type
+  set_fact:
+    foo: '{{"hey"|password_hash("msdcc")}}'
+  ignore_errors: yes
+  register: unsupported_hash_type
+
+- assert:
+    that:
+      - "'msdcc is not in the list of supported passlib algorithms' in unsupported_hash_type.msg"
 
 - name: Verify to_uuid throws on weird namespace
   set_fact:

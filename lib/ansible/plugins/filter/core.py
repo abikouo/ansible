@@ -1,9 +1,7 @@
 # (c) 2012, Jeroen Hoekx <jeroen@hoekx.be>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import base64
 import glob
@@ -27,14 +25,14 @@ from jinja2.filters import pass_environment
 
 from ansible.errors import AnsibleError, AnsibleFilterError, AnsibleFilterTypeError
 from ansible.module_utils.six import string_types, integer_types, reraise, text_type
-from ansible.module_utils._text import to_bytes, to_native, to_text
+from ansible.module_utils.common.text.converters import to_bytes, to_native, to_text
 from ansible.module_utils.common.collections import is_sequence
 from ansible.module_utils.common.yaml import yaml_load, yaml_load_all
 from ansible.parsing.ajson import AnsibleJSONEncoder
 from ansible.parsing.yaml.dumper import AnsibleDumper
 from ansible.template import recursive_check_defined
 from ansible.utils.display import Display
-from ansible.utils.encrypt import passlib_or_crypt
+from ansible.utils.encrypt import do_encrypt, PASSLIB_AVAILABLE
 from ansible.utils.hashing import md5s, checksum_s
 from ansible.utils.unicode import unicode_wrap
 from ansible.utils.vars import merge_hash
@@ -45,7 +43,7 @@ UUID_NAMESPACE_ANSIBLE = uuid.UUID('361E6D51-FAEC-444A-9079-341386DA8E2E')
 
 
 def to_yaml(a, *args, **kw):
-    '''Make verbose, human readable yaml'''
+    """Make verbose, human-readable yaml"""
     default_flow_style = kw.pop('default_flow_style', None)
     try:
         transformed = yaml.dump(a, Dumper=AnsibleDumper, allow_unicode=True, default_flow_style=default_flow_style, **kw)
@@ -55,7 +53,7 @@ def to_yaml(a, *args, **kw):
 
 
 def to_nice_yaml(a, indent=4, *args, **kw):
-    '''Make verbose, human readable yaml'''
+    """Make verbose, human-readable yaml"""
     try:
         transformed = yaml.dump(a, Dumper=AnsibleDumper, indent=indent, allow_unicode=True, default_flow_style=False, **kw)
     except Exception as e:
@@ -64,7 +62,7 @@ def to_nice_yaml(a, indent=4, *args, **kw):
 
 
 def to_json(a, *args, **kw):
-    ''' Convert the value to JSON '''
+    """ Convert the value to JSON """
 
     # defaults for filters
     if 'vault_to_text' not in kw:
@@ -76,12 +74,14 @@ def to_json(a, *args, **kw):
 
 
 def to_nice_json(a, indent=4, sort_keys=True, *args, **kw):
-    '''Make verbose, human readable JSON'''
+    """Make verbose, human-readable JSON"""
+    # TODO separators can be potentially exposed to the user as well
+    kw.pop('separators', None)
     return to_json(a, indent=indent, sort_keys=sort_keys, separators=(',', ': '), *args, **kw)
 
 
 def to_bool(a):
-    ''' return a bool for the arg '''
+    """ return a bool for the arg """
     if a is None or isinstance(a, bool):
         return a
     if isinstance(a, string_types):
@@ -96,7 +96,7 @@ def to_datetime(string, format="%Y-%m-%d %H:%M:%S"):
 
 
 def strftime(string_format, second=None, utc=False):
-    ''' return a date string using string. See https://docs.python.org/3/library/time.html#time.strftime for format '''
+    """ return a date string using string. See https://docs.python.org/3/library/time.html#time.strftime for format """
     if utc:
         timefn = time.gmtime
     else:
@@ -110,19 +110,19 @@ def strftime(string_format, second=None, utc=False):
 
 
 def quote(a):
-    ''' return its argument quoted for shell usage '''
+    """ return its argument quoted for shell usage """
     if a is None:
         a = u''
     return shlex.quote(to_text(a))
 
 
 def fileglob(pathname):
-    ''' return list of matched regular files for glob '''
+    """ return list of matched regular files for glob """
     return [g for g in glob.glob(pathname) if os.path.isfile(g)]
 
 
-def regex_replace(value='', pattern='', replacement='', ignorecase=False, multiline=False):
-    ''' Perform a `re.sub` returning a string '''
+def regex_replace(value='', pattern='', replacement='', ignorecase=False, multiline=False, count=0, mandatory_count=0):
+    """ Perform a `re.sub` returning a string """
 
     value = to_text(value, errors='surrogate_or_strict', nonstring='simplerepr')
 
@@ -132,11 +132,15 @@ def regex_replace(value='', pattern='', replacement='', ignorecase=False, multil
     if multiline:
         flags |= re.M
     _re = re.compile(pattern, flags=flags)
-    return _re.sub(replacement, value)
+    (output, subs) = _re.subn(replacement, value, count=count)
+    if mandatory_count and mandatory_count != subs:
+        raise AnsibleFilterError("'%s' should match %d times, but matches %d times in '%s'"
+                                 % (pattern, mandatory_count, count, value))
+    return output
 
 
 def regex_findall(value, regex, multiline=False, ignorecase=False):
-    ''' Perform re.findall and return the list of matches '''
+    """ Perform re.findall and return the list of matches """
 
     value = to_text(value, errors='surrogate_or_strict', nonstring='simplerepr')
 
@@ -149,7 +153,7 @@ def regex_findall(value, regex, multiline=False, ignorecase=False):
 
 
 def regex_search(value, regex, *args, **kwargs):
-    ''' Perform re.search and return the list of matches or a backref '''
+    """ Perform re.search and return the list of matches or a backref """
 
     value = to_text(value, errors='surrogate_or_strict', nonstring='simplerepr')
 
@@ -182,7 +186,7 @@ def regex_search(value, regex, *args, **kwargs):
 
 
 def ternary(value, true_val, false_val, none_val=None):
-    '''  value ? true_val : false_val '''
+    """  value ? true_val : false_val """
     if value is None and none_val is not None:
         return none_val
     elif bool(value):
@@ -192,8 +196,8 @@ def ternary(value, true_val, false_val, none_val=None):
 
 
 def regex_escape(string, re_type='python'):
+    """Escape all regular expressions special characters from STRING."""
     string = to_text(string, errors='surrogate_or_strict', nonstring='simplerepr')
-    '''Escape all regular expressions special characters from STRING.'''
     if re_type == 'python':
         return re.escape(string)
     elif re_type == 'posix_basic':
@@ -281,10 +285,16 @@ def get_encrypted_password(password, hashtype='sha512', salt=None, salt_size=Non
     }
 
     hashtype = passlib_mapping.get(hashtype, hashtype)
+
+    if PASSLIB_AVAILABLE and hashtype not in passlib_mapping and hashtype not in passlib_mapping.values():
+        raise AnsibleFilterError(f"{hashtype} is not in the list of supported passlib algorithms: {', '.join(passlib_mapping)}")
+
     try:
-        return passlib_or_crypt(password, hashtype, salt=salt, salt_size=salt_size, rounds=rounds, ident=ident)
+        return do_encrypt(password, hashtype, salt=salt, salt_size=salt_size, rounds=rounds, ident=ident)
     except AnsibleError as e:
         reraise(AnsibleFilterError, AnsibleFilterError(to_native(e), orig_exc=e), sys.exc_info()[2])
+    except Exception as e:
+        raise AnsibleFilterError(f"Failed to encrypt the password due to: {e}")
 
 
 def to_uuid(string, namespace=UUID_NAMESPACE_ANSIBLE):
@@ -299,9 +309,9 @@ def to_uuid(string, namespace=UUID_NAMESPACE_ANSIBLE):
 
 
 def mandatory(a, msg=None):
+    """Make a variable mandatory."""
     from jinja2.runtime import Undefined
 
-    ''' Make a variable mandatory '''
     if isinstance(a, Undefined):
         if a._undefined_name is not None:
             name = "'%s' " % to_text(a._undefined_name)
@@ -310,8 +320,7 @@ def mandatory(a, msg=None):
 
         if msg is not None:
             raise AnsibleFilterError(to_native(msg))
-        else:
-            raise AnsibleFilterError("Mandatory variable %s not defined." % name)
+        raise AnsibleFilterError("Mandatory variable %s not defined." % name)
 
     return a
 
@@ -478,14 +487,14 @@ def flatten(mylist, levels=None, skip_nulls=True):
 
 
 def subelements(obj, subelements, skip_missing=False):
-    '''Accepts a dict or list of dicts, and a dotted accessor and produces a product
+    """Accepts a dict or list of dicts, and a dotted accessor and produces a product
     of the element and the results of the dotted accessor
 
     >>> obj = [{"name": "alice", "groups": ["wheel"], "authorized": ["/tmp/alice/onekey.pub"]}]
     >>> subelements(obj, 'groups')
     [({'name': 'alice', 'groups': ['wheel'], 'authorized': ['/tmp/alice/onekey.pub']}, 'wheel')]
 
-    '''
+    """
     if isinstance(obj, dict):
         element_list = list(obj.values())
     elif isinstance(obj, list):
@@ -524,8 +533,8 @@ def subelements(obj, subelements, skip_missing=False):
 
 
 def dict_to_list_of_dict_key_value_elements(mydict, key_name='key', value_name='value'):
-    ''' takes a dictionary and transforms it into a list of dictionaries,
-        with each having a 'key' and 'value' keys that correspond to the keys and values of the original '''
+    """ takes a dictionary and transforms it into a list of dictionaries,
+        with each having a 'key' and 'value' keys that correspond to the keys and values of the original """
 
     if not isinstance(mydict, Mapping):
         raise AnsibleFilterTypeError("dict2items requires a dictionary, got %s instead." % type(mydict))
@@ -537,8 +546,8 @@ def dict_to_list_of_dict_key_value_elements(mydict, key_name='key', value_name='
 
 
 def list_of_dict_key_value_elements_to_dict(mylist, key_name='key', value_name='value'):
-    ''' takes a list of dicts with each having a 'key' and 'value' keys, and transforms the list into a dictionary,
-        effectively as the reverse of dict2items '''
+    """ takes a list of dicts with each having a 'key' and 'value' keys, and transforms the list into a dictionary,
+        effectively as the reverse of dict2items """
 
     if not is_sequence(mylist):
         raise AnsibleFilterTypeError("items2dict requires a list, got %s instead." % type(mylist))
@@ -555,14 +564,13 @@ def list_of_dict_key_value_elements_to_dict(mylist, key_name='key', value_name='
 
 
 def path_join(paths):
-    ''' takes a sequence or a string, and return a concatenation
-        of the different members '''
+    """ takes a sequence or a string, and return a concatenation
+        of the different members """
     if isinstance(paths, string_types):
         return os.path.join(paths)
-    elif is_sequence(paths):
+    if is_sequence(paths):
         return os.path.join(*paths)
-    else:
-        raise AnsibleFilterTypeError("|path_join expects string or sequence, got %s instead." % type(paths))
+    raise AnsibleFilterTypeError("|path_join expects string or sequence, got %s instead." % type(paths))
 
 
 def commonpath(paths):
@@ -575,13 +583,13 @@ def commonpath(paths):
     :rtype: str
     """
     if not is_sequence(paths):
-        raise AnsibleFilterTypeError("|path_join expects sequence, got %s instead." % type(paths))
+        raise AnsibleFilterTypeError("|commonpath expects sequence, got %s instead." % type(paths))
 
     return os.path.commonpath(paths)
 
 
 class FilterModule(object):
-    ''' Ansible core jinja2 filters '''
+    """ Ansible core jinja2 filters """
 
     def filters(self):
         return {

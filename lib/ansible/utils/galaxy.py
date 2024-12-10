@@ -15,9 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import os
 import tempfile
@@ -66,7 +64,7 @@ def scm_archive_resource(src, scm='git', name=None, version='HEAD', keep_scm_met
     clone_cmd = [scm_path, 'clone']
 
     # Add specific options for ignoring certificates if requested
-    ignore_certs = context.CLIARGS['ignore_certs']
+    ignore_certs = context.CLIARGS['ignore_certs'] or C.GALAXY_IGNORE_CERTS
 
     if ignore_certs:
         if scm == 'git':

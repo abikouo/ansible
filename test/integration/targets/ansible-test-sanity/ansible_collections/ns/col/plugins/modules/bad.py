@@ -1,25 +1,24 @@
 #!/usr/bin/python
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import absolute_import, division, print_function
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
 module: bad
 short_description: Bad test module
 description: Bad test module.
 author:
   - Ansible Core Team
-'''
+"""
 
-EXAMPLES = '''
+EXAMPLES = """
 - bad:
-'''
+"""
 
-RETURN = ''''''
+RETURN = """"""
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible import constants  # intentionally trigger pylint ansible-bad-module-import error
+from ansible import constants  # intentionally trigger pylint ansible-bad-module-import error  # pylint: disable=unused-import
 
 
 def main():

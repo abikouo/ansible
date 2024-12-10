@@ -1,8 +1,7 @@
 # (c) 2015, Yannig Perre <yannig.perre(at)gmail.com>
 # (c) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 DOCUMENTATION = """
     name: ini
@@ -39,7 +38,7 @@ DOCUMENTATION = """
         default: ''
       case_sensitive:
         description:
-          Whether key names read from C(file) should be case sensitive. This prevents
+          Whether key names read from O(file) should be case sensitive. This prevents
           duplicate key errors if keys only differ in case.
         default: False
         version_added: '2.12'
@@ -50,6 +49,15 @@ DOCUMENTATION = """
         default: False
         aliases: ['allow_none']
         version_added: '2.12'
+      interpolation:
+        description:
+          Allows for interpolation of values, see https://docs.python.org/3/library/configparser.html#configparser.BasicInterpolation
+        type: bool
+        default: True
+        version_added: '2.18'
+    seealso:
+      - ref: playbook_task_paths
+        description: Search paths used for relative files.
 """
 
 EXAMPLES = """
@@ -85,12 +93,12 @@ from collections import defaultdict
 from collections.abc import MutableSequence
 
 from ansible.errors import AnsibleLookupError, AnsibleOptionsError
-from ansible.module_utils._text import to_text, to_native
+from ansible.module_utils.common.text.converters import to_text, to_native
 from ansible.plugins.lookup import LookupBase
 
 
 def _parse_params(term, paramvals):
-    '''Safely split parameter term to preserve spaces'''
+    """Safely split parameter term to preserve spaces"""
 
     # TODO: deprecate this method
     valid_keys = paramvals.keys()
@@ -138,7 +146,10 @@ class LookupModule(LookupBase):
         self.set_options(var_options=variables, direct=kwargs)
         paramvals = self.get_options()
 
-        self.cp = configparser.ConfigParser(allow_no_value=paramvals.get('allow_no_value', paramvals.get('allow_none')))
+        self.cp = configparser.ConfigParser(
+            allow_no_value=paramvals.get('allow_no_value', paramvals.get('allow_none')),
+            interpolation=configparser.BasicInterpolation() if paramvals.get('interpolation') else None,
+        )
         if paramvals['case_sensitive']:
             self.cp.optionxform = to_native
 
@@ -152,16 +163,20 @@ class LookupModule(LookupBase):
                 params = _parse_params(term, paramvals)
                 try:
                     updated_key = False
+                    updated_options = False
                     for param in params:
                         if '=' in param:
                             name, value = param.split('=')
                             if name not in paramvals:
                                 raise AnsibleLookupError('%s is not a valid option.' % name)
-                            paramvals[name] = value
+                            self.set_option(name, value)
+                            updated_options = True
                         elif key == term:
                             # only take first, this format never supported multiple keys inline
                             key = param
                             updated_key = True
+                    if updated_options:
+                        paramvals = self.get_options()
                 except ValueError as e:
                     # bad params passed
                     raise AnsibleLookupError("Could not use '%s' from '%s': %s" % (param, params, to_native(e)), orig_exc=e)
@@ -187,7 +202,7 @@ class LookupModule(LookupBase):
             config.seek(0, os.SEEK_SET)
 
             try:
-                self.cp.readfp(config)
+                self.cp.read_file(config)
             except configparser.DuplicateOptionError as doe:
                 raise AnsibleLookupError("Duplicate option in '{file}': {error}".format(file=paramvals['file'], error=to_native(doe)))
 

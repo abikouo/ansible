@@ -2,10 +2,9 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = r'''
+DOCUMENTATION = r"""
   name: urlsplit
   version_added: "2.4"
   short_description: get components from URL
@@ -21,9 +20,9 @@ DOCUMENTATION = r'''
       description: Specify a single component to return.
       type: str
       choices: ["fragment", "hostname", "netloc", "password",  "path",  "port",  "query", "scheme",  "username"]
-'''
+"""
 
-EXAMPLES = r'''
+EXAMPLES = r"""
 
     parts: '{{ "http://user:password@www.acme.com:9000/dir/index.html?query=term#fragment" | urlsplit }}'
     # =>
@@ -47,15 +46,15 @@ EXAMPLES = r'''
 
     path: '{{ "http://user:password@www.acme.com:9000/dir/index.html?query=term#fragment" | urlsplit("path") }}'
     # => '/dir/index.html'
-'''
+"""
 
-RETURN = r'''
+RETURN = r"""
   _value:
     description:
       - A dictionary with components as keyword and their value.
-      - If I(query) is provided, a string or integer will be returned instead, depending on I(query).
+      - If O(query) is provided, a string or integer will be returned instead, depending on O(query).
     type: any
-'''
+"""
 
 from urllib.parse import urlsplit
 
@@ -79,7 +78,7 @@ def split_url(value, query='', alias='urlsplit'):
 
 # ---- Ansible filters ----
 class FilterModule(object):
-    ''' URI filter '''
+    """ URI filter """
 
     def filters(self):
         return {

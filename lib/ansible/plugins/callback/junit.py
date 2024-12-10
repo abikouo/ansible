@@ -2,10 +2,9 @@
 # (c) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
     name: junit
     type: aggregate
     short_description: write playbook output to a JUnit file.
@@ -81,14 +80,14 @@ DOCUMENTATION = '''
           - name: JUNIT_TEST_CASE_PREFIX
     requirements:
       - enable in configuration
-'''
+"""
 
 import os
 import time
 import re
 
 from ansible import constants as C
-from ansible.module_utils._text import to_bytes, to_text
+from ansible.module_utils.common.text.converters import to_bytes, to_text
 from ansible.plugins.callback import CallbackBase
 from ansible.utils._junit_xml import (
     TestCase,

@@ -5,23 +5,19 @@
 from __future__ import annotations
 
 import astroid
-from pylint.interfaces import IAstroidChecker
+
+try:
+    from pylint.checkers.utils import check_messages
+except ImportError:
+    from pylint.checkers.utils import only_required_for_messages as check_messages
+
 from pylint.checkers import BaseChecker
 from pylint.checkers import utils
-from pylint.checkers.utils import check_messages
-try:
-    from pylint.checkers.utils import parse_format_method_string
-except ImportError:
-    # noinspection PyUnresolvedReferences
-    from pylint.checkers.strings import parse_format_method_string
 
 MSGS = {
-    'E9305': ("Format string contains automatic field numbering "
-              "specification",
+    'E9305': ("disabled",  # kept for backwards compatibility with inline ignores, remove after 2.14 is EOL
               "ansible-format-automatic-specification",
-              "Used when a PEP 3101 format string contains automatic "
-              "field numbering (e.g. '{}').",
-              {'minversion': (2, 6)}),
+              "disabled"),
     'E9390': ("bytes object has no .format attribute",
               "ansible-no-format-on-bytestring",
               "Used when a bytestring was used as a PEP 3101 format string "
@@ -35,7 +31,6 @@ class AnsibleStringFormatChecker(BaseChecker):
     is valid and the arguments match the format string.
     """
 
-    __implements__ = (IAstroidChecker,)
     name = 'string'
     msgs = MSGS
 
@@ -63,20 +58,6 @@ class AnsibleStringFormatChecker(BaseChecker):
 
         if isinstance(strnode.value, bytes):
             self.add_message('ansible-no-format-on-bytestring', node=node)
-            return
-        if not isinstance(strnode.value, str):
-            return
-
-        if node.starargs or node.kwargs:
-            return
-        try:
-            num_args = parse_format_method_string(strnode.value)[1]
-        except utils.IncompleteFormatString:
-            return
-
-        if num_args:
-            self.add_message('ansible-format-automatic-specification',
-                             node=node)
             return
 
 

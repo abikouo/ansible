@@ -5,7 +5,7 @@ source virtualenv.sh
 
 
 MYTMPDIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'mytmpdir')
-trap 'rm -rf "${MYTMPDIR}"' EXIT
+trap 'chmod -R u+rwx ${MYTMPDIR}; rm -rf "${MYTMPDIR}"' EXIT
 
 # create a test file
 TEST_FILE="${MYTMPDIR}/test_file"
@@ -46,6 +46,18 @@ echo $?
 
 # view the vault encrypted password file
 ansible-vault view "$@" --vault-id vault-password encrypted-vault-password
+
+# check if ansible-vault fails when destination is not writable
+NOT_WRITABLE_DIR="${MYTMPDIR}/not_writable"
+TEST_FILE_EDIT4="${NOT_WRITABLE_DIR}/testfile"
+mkdir "${NOT_WRITABLE_DIR}"
+touch "${TEST_FILE_EDIT4}"
+chmod ugo-w "${NOT_WRITABLE_DIR}"
+ansible-vault encrypt "$@" --vault-password-file vault-password "${TEST_FILE_EDIT4}" < /dev/null > log 2>&1 && :
+grep "not writable" log && :
+WRONG_RC=$?
+echo "rc was $WRONG_RC (1 is expected)"
+[ $WRONG_RC -eq 1 ]
 
 # encrypt with a password from a vault encrypted password file and multiple vault-ids
 # should fail because we dont know which vault id to use to encrypt with
@@ -169,6 +181,12 @@ echo "rc was $WRONG_RC (1 is expected)"
 
 # new 1.2 format, view, using password script with vault-id, ENFORCE_IDENTITY_MATCH=true, should fail
 ANSIBLE_VAULT_ID_MATCH=1 ansible-vault view "$@" --vault-id password-script.py format_1_2_AES256.yml && :
+WRONG_RC=$?
+echo "rc was $WRONG_RC (1 is expected)"
+[ $WRONG_RC -eq 1 ]
+
+# test if vault password file is not a directory
+ANSIBLE_VAULT_PASSWORD_FILE='' ansible-vault view "$@" format_1_1_AES.yml && :
 WRONG_RC=$?
 echo "rc was $WRONG_RC (1 is expected)"
 [ $WRONG_RC -eq 1 ]
@@ -534,21 +552,22 @@ sudo chmod 000 "${MYTMPDIR}/unreadable"
 ansible-vault encrypt_string content
 ansible-vault encrypt_string content --encrypt-vault-id id3
 
-set +e
-
 # Try to use a missing vault password file
-ansible-vault encrypt_string content --encrypt-vault-id id1 2>&1 | tee out.txt
-test $? -ne 0
-grep out.txt -e '[WARNING]: Error getting vault password file (id1)'
-grep out.txt -e "ERROR! Did not find a match for --encrypt-vault-id=id2 in the known vault-ids ['id3']"
+if ansible-vault encrypt_string content --encrypt-vault-id id1 > out.txt 2>&1; then
+  echo "command did not fail"
+  exit 1
+fi
+grep out.txt -e '\[WARNING\]: Error getting vault password file (id1)'
+grep out.txt -e "ERROR! Did not find a match for --encrypt-vault-id=id1 in the known vault-ids \['id3'\]"
 
 # Try to use an inaccessible vault password file
-ansible-vault encrypt_string content --encrypt-vault-id id2 2>&1 | tee out.txt
-test $? -ne 0
-grep out.txt -e "[WARNING]: Error in vault password file loading (id2)"
-grep out.txt -e "ERROR! Did not find a match for --encrypt-vault-id=id2 in the known vault-ids ['id3']"
+if ansible-vault encrypt_string content --encrypt-vault-id id2 > out.txt 2>&1; then
+  echo "command did not fail"
+  exit 1
+fi
+grep out.txt -e "\[WARNING\]: Error in vault password file loading (id2)"
+grep out.txt -e "ERROR! Did not find a match for --encrypt-vault-id=id2 in the known vault-ids \['id3'\]"
 
-set -e
 unset ANSIBLE_VAULT_IDENTITY_LIST
 
 # 'real script'
@@ -591,6 +610,6 @@ ansible-vault encrypt salted_test3 --vault-password-file example1_password "$@"
 out=$(diff salted_test1 salted_test2)
 [ "${out}" == "" ]
 
-# shoudl be diff
+# should be diff
 out=$(diff salted_test1 salted_test3 || true)
 [ "${out}" != "" ]

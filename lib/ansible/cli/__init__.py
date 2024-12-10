@@ -3,9 +3,7 @@
 # Copyright: (c) 2018, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import locale
 import os
@@ -13,9 +11,9 @@ import sys
 
 # Used for determining if the system is running a new enough python version
 # and should only restrict on our documented minimum versions
-if sys.version_info < (3, 9):
+if sys.version_info < (3, 11):
     raise SystemExit(
-        'ERROR: Ansible requires Python 3.9 or newer on the controller. '
+        'ERROR: Ansible requires Python 3.11 or newer on the controller. '
         'Current version: %s' % ''.join(sys.version.splitlines())
     )
 
@@ -97,11 +95,12 @@ from ansible.cli.arguments import option_helpers as opt_help
 from ansible.errors import AnsibleError, AnsibleOptionsError, AnsibleParserError
 from ansible.inventory.manager import InventoryManager
 from ansible.module_utils.six import string_types
-from ansible.module_utils._text import to_bytes, to_text
+from ansible.module_utils.common.text.converters import to_bytes, to_text
+from ansible.module_utils.common.collections import is_sequence
 from ansible.module_utils.common.file import is_executable
 from ansible.parsing.dataloader import DataLoader
 from ansible.parsing.vault import PromptVaultSecret, get_file_vault_secret
-from ansible.plugins.loader import add_all_plugin_dirs
+from ansible.plugins.loader import add_all_plugin_dirs, init_plugin_loader
 from ansible.release import __version__
 from ansible.utils.collection_loader import AnsibleCollectionConfig
 from ansible.utils.collection_loader._collection_finder import _get_collection_name_from_path
@@ -117,7 +116,7 @@ except ImportError:
 
 
 class CLI(ABC):
-    ''' code behind bin/ansible* programs '''
+    """ code behind bin/ansible* programs """
 
     PAGER = C.config.get_config_value('PAGER')
 
@@ -154,6 +153,13 @@ class CLI(ABC):
         """
         self.parse()
 
+        # Initialize plugin loader after parse, so that the init code can utilize parsed arguments
+        cli_collections_path = context.CLIARGS.get('collections_path') or []
+        if not is_sequence(cli_collections_path):
+            # In some contexts ``collections_path`` is singular
+            cli_collections_path = [cli_collections_path]
+        init_plugin_loader(cli_collections_path)
+
         display.vv(to_text(opt_help.version(self.parser.prog)))
 
         if C.CONFIG_FILE:
@@ -161,19 +167,7 @@ class CLI(ABC):
         else:
             display.v(u"No config file found; using defaults")
 
-        # warn about deprecated config options
-        for deprecated in C.config.DEPRECATED:
-            name = deprecated[0]
-            why = deprecated[1]['why']
-            if 'alternatives' in deprecated[1]:
-                alt = ', use %s instead' % deprecated[1]['alternatives']
-            else:
-                alt = ''
-            ver = deprecated[1].get('version')
-            date = deprecated[1].get('date')
-            collection_name = deprecated[1].get('collection_name')
-            display.deprecated("%s option, %s%s" % (name, why, alt),
-                               version=ver, date=date, collection_name=collection_name)
+        C.handle_config_noise(display)
 
     @staticmethod
     def split_vault_id(vault_id):
@@ -188,8 +182,7 @@ class CLI(ABC):
 
     @staticmethod
     def build_vault_ids(vault_ids, vault_password_files=None,
-                        ask_vault_pass=None, create_new_password=None,
-                        auto_prompt=True):
+                        ask_vault_pass=None, auto_prompt=True):
         vault_password_files = vault_password_files or []
         vault_ids = vault_ids or []
 
@@ -212,7 +205,6 @@ class CLI(ABC):
 
         return vault_ids
 
-    # TODO: remove the now unused args
     @staticmethod
     def setup_vault_secrets(loader, vault_ids, vault_password_files=None,
                             ask_vault_pass=None, create_new_password=False,
@@ -246,7 +238,6 @@ class CLI(ABC):
         vault_ids = CLI.build_vault_ids(vault_ids,
                                         vault_password_files,
                                         ask_vault_pass,
-                                        create_new_password,
                                         auto_prompt=auto_prompt)
 
         last_exception = found_vault_secret = None
@@ -326,7 +317,7 @@ class CLI(ABC):
 
     @staticmethod
     def ask_passwords():
-        ''' prompt for connection and become passwords if needed '''
+        """ prompt for connection and become passwords if needed """
 
         op = context.CLIARGS
         sshpass = None
@@ -356,7 +347,7 @@ class CLI(ABC):
         return (sshpass, becomepass)
 
     def validate_conflicts(self, op, runas_opts=False, fork_opts=False):
-        ''' check for conflicting options '''
+        """ check for conflicting options """
 
         if fork_opts:
             if op.forks < 1:
@@ -422,6 +413,10 @@ class CLI(ABC):
                     skip_tags.add(tag.strip())
             options.skip_tags = list(skip_tags)
 
+        # Make sure path argument doesn't have a backslash
+        if hasattr(options, 'action') and options.action in ['install', 'download'] and hasattr(options, 'args'):
+            options.args = [path.rstrip("/") for path in options.args]
+
         # process inventory options except for CLIs that require their own processing
         if hasattr(options, 'inventory') and not self.SKIP_INVENTORY_DEFAULTS:
 
@@ -464,7 +459,7 @@ class CLI(ABC):
 
     @staticmethod
     def version_info(gitinfo=False):
-        ''' return full ansible version info '''
+        """ return full ansible version info """
         if gitinfo:
             # expensive call, user with care
             ansible_version_string = opt_help.version()
@@ -490,7 +485,7 @@ class CLI(ABC):
 
     @staticmethod
     def pager(text):
-        ''' find reasonable way to display text '''
+        """ find reasonable way to display text """
         # this is a much simpler form of what is in pydoc.py
         if not sys.stdout.isatty():
             display.display(text, screen_only=True)
@@ -509,7 +504,7 @@ class CLI(ABC):
 
     @staticmethod
     def pager_pipe(text):
-        ''' pipe text through a pager '''
+        """ pipe text through a pager """
         if 'less' in CLI.PAGER:
             os.environ['LESS'] = CLI.LESS_OPTS
         try:
@@ -522,6 +517,10 @@ class CLI(ABC):
 
     @staticmethod
     def _play_prereqs():
+        # TODO: evaluate moving all of the code that touches ``AnsibleCollectionConfig``
+        # into ``init_plugin_loader`` so that we can specifically remove
+        # ``AnsibleCollectionConfig.playbook_paths`` to make it immutable after instantiation
+
         options = context.CLIARGS
 
         # all needs loader
@@ -555,7 +554,18 @@ class CLI(ABC):
         # the code, ensuring a consistent view of global variables
         variable_manager = VariableManager(loader=loader, inventory=inventory, version_info=CLI.version_info(gitinfo=False))
 
+        # flush fact cache if requested
+        if options['flush_cache']:
+            CLI._flush_cache(inventory, variable_manager)
+
         return loader, inventory, variable_manager
+
+    @staticmethod
+    def _flush_cache(inventory, variable_manager):
+        variable_manager.clear_facts('localhost')
+        for host in inventory.list_hosts():
+            hostname = host.get_name()
+            variable_manager.clear_facts(hostname)
 
     @staticmethod
     def get_host_list(inventory, subset, pattern='all'):
@@ -594,7 +604,7 @@ class CLI(ABC):
             try:
                 p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except OSError as e:
-                raise AnsibleError("Problem occured when trying to run the password script %s (%s)."
+                raise AnsibleError("Problem occurred when trying to run the password script %s (%s)."
                                    " If this is not a script, remove the executable bit from the file." % (pwd_file, e))
 
             stdout, stderr = p.communicate()
@@ -604,9 +614,8 @@ class CLI(ABC):
 
         else:
             try:
-                f = open(b_pwd_file, "rb")
-                secret = f.read().strip()
-                f.close()
+                with open(b_pwd_file, "rb") as f:
+                    secret = f.read().strip()
             except (OSError, IOError) as e:
                 raise AnsibleError("Could not read password file %s: %s" % (pwd_file, e))
 

@@ -26,8 +26,9 @@ from .core_ci import (
 @dataclasses.dataclass
 class Bootstrap:
     """Base class for bootstrapping systems."""
+
     controller: bool
-    python_versions: list[str]
+    python_interpreters: dict[str, str]
     ssh_key: SshKey
 
     @property
@@ -40,7 +41,7 @@ class Bootstrap:
         return dict(
             bootstrap_type=self.bootstrap_type,
             controller='yes' if self.controller else '',
-            python_versions=self.python_versions,
+            python_interpreters=[f'{key}:{value}' for key, value in self.python_interpreters.items()],
             ssh_key_type=self.ssh_key.KEY_TYPE,
             ssh_private_key=self.ssh_key.key_contents,
             ssh_public_key=self.ssh_key.pub_contents,
@@ -65,6 +66,7 @@ class Bootstrap:
 @dataclasses.dataclass
 class BootstrapDocker(Bootstrap):
     """Bootstrap docker instances."""
+
     def get_variables(self) -> dict[str, t.Union[str, list[str]]]:
         """The variables to template in the bootstrapping script."""
         variables = super().get_variables()
@@ -80,6 +82,7 @@ class BootstrapDocker(Bootstrap):
 @dataclasses.dataclass
 class BootstrapRemote(Bootstrap):
     """Bootstrap remote instances."""
+
     platform: str
     platform_version: str
 

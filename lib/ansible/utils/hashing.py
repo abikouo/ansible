@@ -15,9 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import os
 
@@ -30,11 +28,11 @@ except ImportError:
     _md5 = None
 
 from ansible.errors import AnsibleError
-from ansible.module_utils._text import to_bytes
+from ansible.module_utils.common.text.converters import to_bytes
 
 
 def secure_hash_s(data, hash_func=sha1):
-    ''' Return a secure hash hex digest of data. '''
+    """ Return a secure hash hex digest of data. """
 
     digest = hash_func()
     data = to_bytes(data, errors='surrogate_or_strict')
@@ -43,7 +41,7 @@ def secure_hash_s(data, hash_func=sha1):
 
 
 def secure_hash(filename, hash_func=sha1):
-    ''' Return a secure hash hex digest of local file, None if file is not present or a directory. '''
+    """ Return a secure hash hex digest of local file, None if file is not present or a directory. """
 
     if not os.path.exists(to_bytes(filename, errors='surrogate_or_strict')) or os.path.isdir(to_bytes(filename, errors='strict')):
         return None

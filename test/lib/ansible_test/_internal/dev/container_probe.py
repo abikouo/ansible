@@ -45,6 +45,7 @@ from ..cgroup import (
 
 class CGroupState(enum.Enum):
     """The expected state of a cgroup related mount point."""
+
     HOST = enum.auto()
     PRIVATE = enum.auto()
     SHADOWED = enum.auto()
@@ -53,6 +54,7 @@ class CGroupState(enum.Enum):
 @dataclasses.dataclass(frozen=True)
 class CGroupMount:
     """Details on a cgroup mount point that is expected to be present in the container."""
+
     path: str
     type: t.Optional[str]
     writable: t.Optional[bool]
@@ -184,7 +186,7 @@ def check_container_cgroup_status(args: EnvironmentConfig, config: DockerConfig,
         write_text_file(os.path.join(args.dev_probe_cgroups, f'{identity}.log'), message)
 
 
-def get_identity(args: EnvironmentConfig, config: DockerConfig, container_name: str):
+def get_identity(args: EnvironmentConfig, config: DockerConfig, container_name: str) -> str:
     """Generate and return an identity string to use when logging test results."""
     engine = require_docker().command
 

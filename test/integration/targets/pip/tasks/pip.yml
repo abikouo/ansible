@@ -219,13 +219,13 @@
     state: absent
     name: "{{ remote_tmp_dir }}/pipenv"
 
-- name: install pip throught pip into fresh virtualenv
+- name: install pip through pip into fresh virtualenv
   pip:
     name: pip
     virtualenv: "{{ remote_tmp_dir }}/pipenv"
   register: pip_install_venv
 
-- name: make sure pip in fresh virtualenv report changed
+- name: make sure pip in fresh virtualenv reports changed
   assert:
     that:
       - "pip_install_venv is changed"
@@ -371,7 +371,7 @@
     version: "<100,!=1.0,>0.0.0"
   register: version2
 
-- name: assert no changes ocurred
+- name: assert no changes occurred
   assert:
     that: "not version2.changed"
 
@@ -567,6 +567,28 @@
       assert:
         that:
           - "version13 is success"
+
+- name: Test virtualenv command with venv formatting
+  when: ansible_python.version.major > 2
+  block:
+    - name: Clean up the virtualenv
+      file:
+        state: absent
+        name: "{{ remote_tmp_dir }}/pipenv"
+
+    # ref: https://github.com/ansible/ansible/issues/76372
+    - name: install using different venv formatting
+      pip:
+        name: "{{ pip_test_package }}"
+        virtualenv: "{{ remote_tmp_dir }}/pipenv"
+        virtualenv_command: "{{ ansible_python_interpreter ~ ' -mvenv' }}"
+        state: present
+      register: version14
+
+    - name: ensure install using virtualenv_command with venv formatting
+      assert:
+        that:
+          - "version14 is changed"
 
 ### test virtualenv_command end ###
 

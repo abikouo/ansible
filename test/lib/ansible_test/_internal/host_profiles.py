@@ -56,6 +56,7 @@ from .util import (
     InternalError,
     HostConnectionError,
     ANSIBLE_TEST_TARGET_ROOT,
+    WINDOWS_CONNECTION_VARIABLES,
 )
 
 from .util_common import (
@@ -99,7 +100,6 @@ from .ansible_util import (
 )
 
 from .containers import (
-    CleanupMode,
     HostType,
     get_container_database,
     run_support_container,
@@ -139,6 +139,7 @@ TRemoteConfig = t.TypeVar('TRemoteConfig', bound=RemoteConfig)
 
 class ControlGroupError(ApplicationError):
     """Raised when the container host does not have the necessary cgroup support to run a container."""
+
     def __init__(self, args: CommonConfig, reason: str) -> None:
         engine = require_docker().command
         dd_wsl2 = get_docker_info(args).docker_desktop_wsl2
@@ -181,6 +182,7 @@ NOTE: These changes must be applied each time the container host is rebooted.
 @dataclasses.dataclass(frozen=True)
 class Inventory:
     """Simple representation of an Ansible inventory."""
+
     host_groups: dict[str, dict[str, dict[str, t.Union[str, int]]]]
     extra_groups: t.Optional[dict[str, list[str]]] = None
 
@@ -226,12 +228,14 @@ class Inventory:
 
 class HostProfile(t.Generic[THostConfig], metaclass=abc.ABCMeta):
     """Base class for host profiles."""
-    def __init__(self,
-                 *,
-                 args: EnvironmentConfig,
-                 config: THostConfig,
-                 targets: t.Optional[list[HostConfig]],
-                 ) -> None:
+
+    def __init__(
+        self,
+        *,
+        args: EnvironmentConfig,
+        config: THostConfig,
+        targets: t.Optional[list[HostConfig]],
+    ) -> None:
         self.args = args
         self.config = config
         self.controller = bool(targets)
@@ -272,6 +276,7 @@ class HostProfile(t.Generic[THostConfig], metaclass=abc.ABCMeta):
 
 class PosixProfile(HostProfile[TPosixConfig], metaclass=abc.ABCMeta):
     """Base class for POSIX host profiles."""
+
     @property
     def python(self) -> PythonConfig:
         """
@@ -293,6 +298,7 @@ class PosixProfile(HostProfile[TPosixConfig], metaclass=abc.ABCMeta):
 
 class ControllerHostProfile(PosixProfile[TControllerHostConfig], metaclass=abc.ABCMeta):
     """Base class for profiles usable as a controller."""
+
     @abc.abstractmethod
     def get_origin_controller_connection(self) -> Connection:
         """Return a connection for accessing the host as a controller from the origin."""
@@ -304,6 +310,7 @@ class ControllerHostProfile(PosixProfile[TControllerHostConfig], metaclass=abc.A
 
 class SshTargetHostProfile(HostProfile[THostConfig], metaclass=abc.ABCMeta):
     """Base class for profiles offering SSH connectivity."""
+
     @abc.abstractmethod
     def get_controller_target_connections(self) -> list[SshConnection]:
         """Return SSH connection(s) for accessing the host as a target from the controller."""
@@ -311,6 +318,7 @@ class SshTargetHostProfile(HostProfile[THostConfig], metaclass=abc.ABCMeta):
 
 class RemoteProfile(SshTargetHostProfile[TRemoteConfig], metaclass=abc.ABCMeta):
     """Base class for remote instance profiles."""
+
     @property
     def core_ci_state(self) -> t.Optional[dict[str, str]]:
         """The saved Ansible Core CI state."""
@@ -351,7 +359,7 @@ class RemoteProfile(SshTargetHostProfile[TRemoteConfig], metaclass=abc.ABCMeta):
 
         return self.core_ci
 
-    def delete_instance(self):
+    def delete_instance(self) -> None:
         """Delete the AnsibleCoreCI VM instance."""
         core_ci = self.get_instance()
 
@@ -387,6 +395,7 @@ class RemoteProfile(SshTargetHostProfile[TRemoteConfig], metaclass=abc.ABCMeta):
 
 class ControllerProfile(SshTargetHostProfile[ControllerConfig], PosixProfile[ControllerConfig]):
     """Host profile for the controller as a target."""
+
     def get_controller_target_connections(self) -> list[SshConnection]:
         """Return SSH connection(s) for accessing the host as a target from the controller."""
         settings = SshConnectionDetail(
@@ -409,6 +418,7 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
     @dataclasses.dataclass(frozen=True)
     class InitConfig:
         """Configuration details required to run the container init."""
+
         options: list[str]
         command: str
         command_privileged: bool
@@ -437,7 +447,7 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
     @property
     def label(self) -> str:
         """Label to apply to resources related to this profile."""
-        return f'{"controller" if self.controller else "target"}-{self.args.session_name}'
+        return f'{"controller" if self.controller else "target"}'
 
     def provision(self) -> None:
         """Provision the host before delegation."""
@@ -452,7 +462,7 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
             ports=[22],
             publish_ports=not self.controller,  # connections to the controller over SSH are not required
             options=init_config.options,
-            cleanup=CleanupMode.NO,
+            cleanup=False,
             cmd=self.build_init_command(init_config, init_probe),
         )
 
@@ -505,6 +515,13 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
         expected_mounts: tuple[CGroupMount, ...]
 
         cgroup_version = get_docker_info(self.args).cgroup_version
+
+        # Podman 4.4.0 updated containers/common to 0.51.0, which removed the SYS_CHROOT capability from the default list.
+        # This capability is needed by services such as sshd, so is unconditionally added here.
+        # See: https://github.com/containers/podman/releases/tag/v4.4.0
+        # See: https://github.com/containers/common/releases/tag/v0.51.0
+        # See: https://github.com/containers/common/pull/1240
+        options.extend(('--cap-add', 'SYS_CHROOT'))
 
         # Without AUDIT_WRITE the following errors may appear in the system logs of a container after attempting to log in using SSH:
         #
@@ -790,6 +807,7 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
           - Avoid hanging indefinitely or for an unreasonably long time.
 
         NOTE: The container must have a POSIX-compliant default shell "sh" with a non-builtin "sleep" command.
+              The "sleep" command is invoked through "env" to avoid using a shell builtin "sleep" (if present).
         """
         command = ''
 
@@ -797,7 +815,7 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
             command += f'{init_config.command} && '
 
         if sleep or init_config.command_privileged:
-            command += 'sleep 60 ; '
+            command += 'env sleep 60 ; '
 
         if not command:
             return None
@@ -821,7 +839,7 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
         """Check the cgroup v1 systemd hierarchy to verify it is writeable for our container."""
         probe_script = (read_text_file(os.path.join(ANSIBLE_TEST_TARGET_ROOT, 'setup', 'check_systemd_cgroup_v1.sh'))
                         .replace('@MARKER@', self.MARKER)
-                        .replace('@LABEL@', self.label))
+                        .replace('@LABEL@', f'{self.label}-{self.args.session_name}'))
 
         cmd = ['sh']
 
@@ -836,7 +854,7 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
 
     def create_systemd_cgroup_v1(self) -> str:
         """Create a unique ansible-test cgroup in the v1 systemd hierarchy and return its path."""
-        self.cgroup_path = f'/sys/fs/cgroup/systemd/ansible-test-{self.label}'
+        self.cgroup_path = f'/sys/fs/cgroup/systemd/ansible-test-{self.label}-{self.args.session_name}'
 
         # Privileged mode is required to create the cgroup directories on some hosts, such as Fedora 36 and RHEL 9.0.
         # The mkdir command will fail with "Permission denied" otherwise.
@@ -892,7 +910,7 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
 
         return message
 
-    def check_cgroup_requirements(self):
+    def check_cgroup_requirements(self) -> None:
         """Check cgroup requirements for the container."""
         cgroup_version = get_docker_info(self.args).cgroup_version
 
@@ -941,7 +959,7 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
         """Perform out-of-band setup before delegation."""
         bootstrapper = BootstrapDocker(
             controller=self.controller,
-            python_versions=[self.python.version],
+            python_interpreters={self.python.version: self.python.path},
             ssh_key=SshKey(self.args),
         )
 
@@ -996,9 +1014,11 @@ class DockerProfile(ControllerHostProfile[DockerConfig], SshTargetHostProfile[Do
             display.info(last_error)
 
             if not self.args.delegate and not self.args.host_path:
+
                 def callback() -> None:
                     """Callback to run during error display."""
                     self.on_target_failure()  # when the controller is not delegated, report failures immediately
+
             else:
                 callback = None
 
@@ -1098,6 +1118,7 @@ class NetworkInventoryProfile(HostProfile[NetworkInventoryConfig]):
 
 class NetworkRemoteProfile(RemoteProfile[NetworkRemoteConfig]):
     """Host profile for a network remote instance."""
+
     def wait(self) -> None:
         """Wait for the instance to be ready. Executed before delegation for the controller and after delegation for targets."""
         self.wait_until_ready()
@@ -1174,6 +1195,7 @@ class NetworkRemoteProfile(RemoteProfile[NetworkRemoteConfig]):
 
 class OriginProfile(ControllerHostProfile[OriginConfig]):
     """Host profile for origin."""
+
     def get_origin_controller_connection(self) -> LocalConnection:
         """Return a connection for accessing the host as a controller from the origin."""
         return LocalConnection(self.args)
@@ -1185,6 +1207,7 @@ class OriginProfile(ControllerHostProfile[OriginConfig]):
 
 class PosixRemoteProfile(ControllerHostProfile[PosixRemoteConfig], RemoteProfile[PosixRemoteConfig]):
     """Host profile for a POSIX remote instance."""
+
     def wait(self) -> None:
         """Wait for the instance to be ready. Executed before delegation for the controller and after delegation for targets."""
         self.wait_until_ready()
@@ -1192,8 +1215,9 @@ class PosixRemoteProfile(ControllerHostProfile[PosixRemoteConfig], RemoteProfile
     def configure(self) -> None:
         """Perform in-band configuration. Executed before delegation for the controller and after delegation for targets."""
         # a target uses a single python version, but a controller may include additional versions for targets running on the controller
-        python_versions = [self.python.version] + [target.python.version for target in self.targets if isinstance(target, ControllerConfig)]
-        python_versions = sorted_versions(list(set(python_versions)))
+        python_interpreters = {self.python.version: self.python.path}
+        python_interpreters.update({target.python.version: target.python.path for target in self.targets if isinstance(target, ControllerConfig)})
+        python_interpreters = {version: python_interpreters[version] for version in sorted_versions(list(python_interpreters.keys()))}
 
         core_ci = self.wait_for_instance()
         pwd = self.wait_until_ready()
@@ -1204,7 +1228,7 @@ class PosixRemoteProfile(ControllerHostProfile[PosixRemoteConfig], RemoteProfile
             controller=self.controller,
             platform=self.config.platform,
             platform_version=self.config.version,
-            python_versions=python_versions,
+            python_interpreters=python_interpreters,
             ssh_key=core_ci.ssh_key,
         )
 
@@ -1291,6 +1315,7 @@ class PosixRemoteProfile(ControllerHostProfile[PosixRemoteConfig], RemoteProfile
 
 class PosixSshProfile(SshTargetHostProfile[PosixSshConfig], PosixProfile[PosixSshConfig]):
     """Host profile for a POSIX SSH instance."""
+
     def get_controller_target_connections(self) -> list[SshConnection]:
         """Return SSH connection(s) for accessing the host as a target from the controller."""
         settings = SshConnectionDetail(
@@ -1307,6 +1332,7 @@ class PosixSshProfile(SshTargetHostProfile[PosixSshConfig], PosixProfile[PosixSs
 
 class WindowsInventoryProfile(SshTargetHostProfile[WindowsInventoryConfig]):
     """Host profile for a Windows inventory."""
+
     def get_controller_target_connections(self) -> list[SshConnection]:
         """Return SSH connection(s) for accessing the host as a target from the controller."""
         inventory = parse_inventory(self.args, self.config.path)
@@ -1331,6 +1357,7 @@ class WindowsInventoryProfile(SshTargetHostProfile[WindowsInventoryConfig]):
 
 class WindowsRemoteProfile(RemoteProfile[WindowsRemoteConfig]):
     """Host profile for a Windows remote instance."""
+
     def wait(self) -> None:
         """Wait for the instance to be ready. Executed before delegation for the controller and after delegation for targets."""
         self.wait_until_ready()
@@ -1341,23 +1368,18 @@ class WindowsRemoteProfile(RemoteProfile[WindowsRemoteConfig]):
         connection = core_ci.connection
 
         variables: dict[str, t.Optional[t.Union[str, int]]] = dict(
-            ansible_connection='winrm',
-            ansible_pipelining='yes',
-            ansible_winrm_server_cert_validation='ignore',
             ansible_host=connection.hostname,
-            ansible_port=connection.port,
+            # ansible_port is intentionally not set using connection.port -- connection-specific variables can set this instead
             ansible_user=connection.username,
-            ansible_password=connection.password,
-            ansible_ssh_private_key_file=core_ci.ssh_key.key,
+            ansible_ssh_private_key_file=core_ci.ssh_key.key,  # required for scenarios which change the connection plugin to SSH
+            ansible_test_connection_password=connection.password,  # required for scenarios which change the connection plugin to require a password
         )
 
-        # HACK: force 2016 to use NTLM + HTTP message encryption
-        if self.config.version == '2016':
-            variables.update(
-                ansible_winrm_transport='ntlm',
-                ansible_winrm_scheme='http',
-                ansible_port='5985',
-            )
+        variables.update(ansible_connection=self.config.connection.split('+')[0])
+        variables.update(WINDOWS_CONNECTION_VARIABLES[self.config.connection])
+
+        if variables.pop('use_password'):
+            variables.update(ansible_password=connection.password)
 
         return variables
 
@@ -1411,9 +1433,9 @@ def get_config_profile_type_map() -> dict[t.Type[HostConfig], t.Type[HostProfile
 
 
 def create_host_profile(
-        args: EnvironmentConfig,
-        config: HostConfig,
-        controller: bool,
+    args: EnvironmentConfig,
+    config: HostConfig,
+    controller: bool,
 ) -> HostProfile:
     """Create and return a host profile from the given host configuration."""
     profile_type = get_config_profile_type_map()[type(config)]

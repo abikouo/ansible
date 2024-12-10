@@ -2,10 +2,9 @@
 # (c) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
     name: default
     type: stdout
     short_description: default Ansible screen output
@@ -17,7 +16,7 @@ DOCUMENTATION = '''
       - result_format_callback
     requirements:
       - set as stdout in configuration
-'''
+"""
 
 
 from ansible import constants as C
@@ -30,10 +29,10 @@ from ansible.utils.fqcn import add_internal_fqcns
 
 class CallbackModule(CallbackBase):
 
-    '''
+    """
     This is the default callback interface, which simply prints messages
     to stdout when new callback events are received.
-    '''
+    """
 
     CALLBACK_VERSION = 2.0
     CALLBACK_TYPE = 'stdout'
@@ -166,7 +165,7 @@ class CallbackModule(CallbackBase):
         # args can be specified as no_log in several places: in the task or in
         # the argument spec.  We can check whether the task is no_log but the
         # argument spec can't be because that is only run on the target
-        # machine and we haven't run it thereyet at this time.
+        # machine and we haven't run it there yet at this time.
         #
         # So we give people a config option to affect display of the args so
         # that they can secure this if they feel that their stdout is insecure
@@ -294,7 +293,7 @@ class CallbackModule(CallbackBase):
         label = self._get_item_label(included_file._vars)
         if label:
             msg += " => (item=%s)" % label
-        self._display.display(msg, color=C.COLOR_SKIP)
+        self._display.display(msg, color=C.COLOR_INCLUDED)
 
     def v2_playbook_on_stats(self, stats):
         self._display.banner("PLAY RECAP")

@@ -17,6 +17,7 @@ from ...completion import (
 
 from ...util import (
     REMOTE_ARCHITECTURES,
+    WINDOWS_CONNECTIONS,
 )
 
 from ...host_configs import (
@@ -52,6 +53,7 @@ from .helpers import (
 
 class OriginKeyValueParser(KeyValueParser):
     """Composite argument parser for origin key/value pairs."""
+
     def get_parsers(self, state: ParserState) -> dict[str, Parser]:
         """Return a dictionary of key names and value parsers."""
         versions = CONTROLLER_PYTHON_VERSIONS
@@ -75,6 +77,7 @@ class OriginKeyValueParser(KeyValueParser):
 
 class ControllerKeyValueParser(KeyValueParser):
     """Composite argument parser for controller key/value pairs."""
+
     def get_parsers(self, state: ParserState) -> dict[str, Parser]:
         """Return a dictionary of key names and value parsers."""
         versions = get_controller_pythons(state.root_namespace.controller, False)
@@ -99,7 +102,8 @@ class ControllerKeyValueParser(KeyValueParser):
 
 class DockerKeyValueParser(KeyValueParser):
     """Composite argument parser for docker key/value pairs."""
-    def __init__(self, image, controller):
+
+    def __init__(self, image: str, controller: bool) -> None:
         self.controller = controller
         self.versions = get_docker_pythons(image, controller, False)
         self.allow_default = bool(get_docker_pythons(image, controller, True))
@@ -135,7 +139,8 @@ class DockerKeyValueParser(KeyValueParser):
 
 class PosixRemoteKeyValueParser(KeyValueParser):
     """Composite argument parser for POSIX remote key/value pairs."""
-    def __init__(self, name, controller):
+
+    def __init__(self, name: str, controller: bool) -> None:
         self.controller = controller
         self.versions = get_remote_pythons(name, controller, False)
         self.allow_default = bool(get_remote_pythons(name, controller, True))
@@ -167,11 +172,13 @@ class PosixRemoteKeyValueParser(KeyValueParser):
 
 class WindowsRemoteKeyValueParser(KeyValueParser):
     """Composite argument parser for Windows remote key/value pairs."""
+
     def get_parsers(self, state: ParserState) -> dict[str, Parser]:
         """Return a dictionary of key names and value parsers."""
         return dict(
             provider=ChoicesParser(REMOTE_PROVIDERS),
             arch=ChoicesParser(REMOTE_ARCHITECTURES),
+            connection=ChoicesParser(WINDOWS_CONNECTIONS),
         )
 
     def document(self, state: DocumentationState) -> t.Optional[str]:
@@ -181,6 +188,7 @@ class WindowsRemoteKeyValueParser(KeyValueParser):
         state.sections[f'target {section_name} (comma separated):'] = '\n'.join([
             f'  provider={ChoicesParser(REMOTE_PROVIDERS).document(state)}',
             f'  arch={ChoicesParser(REMOTE_ARCHITECTURES).document(state)}',
+            f'  connection={ChoicesParser(WINDOWS_CONNECTIONS).document(state)}',
         ])
 
         return f'{{{section_name}}}'
@@ -188,6 +196,7 @@ class WindowsRemoteKeyValueParser(KeyValueParser):
 
 class NetworkRemoteKeyValueParser(KeyValueParser):
     """Composite argument parser for network remote key/value pairs."""
+
     def get_parsers(self, state: ParserState) -> dict[str, Parser]:
         """Return a dictionary of key names and value parsers."""
         return dict(
@@ -213,6 +222,7 @@ class NetworkRemoteKeyValueParser(KeyValueParser):
 
 class PosixSshKeyValueParser(KeyValueParser):
     """Composite argument parser for POSIX SSH host key/value pairs."""
+
     def get_parsers(self, state: ParserState) -> dict[str, Parser]:
         """Return a dictionary of key names and value parsers."""
         return dict(
@@ -234,6 +244,7 @@ class PosixSshKeyValueParser(KeyValueParser):
 
 class EmptyKeyValueParser(KeyValueParser):
     """Composite argument parser when a key/value parser is required but there are no keys available."""
+
     def get_parsers(self, state: ParserState) -> dict[str, Parser]:
         """Return a dictionary of key names and value parsers."""
         return {}

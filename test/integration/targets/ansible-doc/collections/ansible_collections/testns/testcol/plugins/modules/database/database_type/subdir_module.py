@@ -1,9 +1,8 @@
 #!/usr/bin/python
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
 ---
 module: subdir_module
 short_description: A module in multiple subdirectories
@@ -13,13 +12,13 @@ author:
     - Ansible Core Team
 version_added: 1.0.0
 options: {}
-'''
+"""
 
-EXAMPLES = '''
-'''
+EXAMPLES = """
+"""
 
-RETURN = '''
-'''
+RETURN = """
+"""
 
 
 from ansible.module_utils.basic import AnsibleModule

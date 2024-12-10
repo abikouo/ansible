@@ -13,8 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import glob
 import os
@@ -89,11 +88,11 @@ class LinuxNetwork(Network):
                         locally_reachable_ips['ipv4'].append(address)
 
         args = [ip_path, '-4', 'route', 'show', 'table', 'local']
-        rc, routes, _ = self.module.run_command(args)
+        rc, routes, dummy = self.module.run_command(args)
         if rc == 0:
             parse_locally_reachable_ips(routes)
         args = [ip_path, '-6', 'route', 'show', 'table', 'local']
-        rc, routes, _ = self.module.run_command(args)
+        rc, routes, dummy = self.module.run_command(args)
         if rc == 0:
             parse_locally_reachable_ips(routes)
 
@@ -274,7 +273,7 @@ class LinuxNetwork(Network):
                     elif words[0] == 'inet6':
                         if 'peer' == words[2]:
                             address = words[1]
-                            _, prefix = words[3].split('/')
+                            dummy, prefix = words[3].split('/')
                             scope = words[5]
                         else:
                             address, prefix = words[1].split('/')
@@ -295,8 +294,6 @@ class LinuxNetwork(Network):
                             default_ipv6['type'] = interfaces[device].get("type", "unknown")
                         if not address == '::1':
                             ips['all_ipv6_addresses'].append(address)
-
-            ip_path = self.module.get_bin_path("ip")
 
             args = [ip_path, 'addr', 'show', 'primary', 'dev', device]
             rc, primary_data, stderr = self.module.run_command(args, errors='surrogate_then_replace')

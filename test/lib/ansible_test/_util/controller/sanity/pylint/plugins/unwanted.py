@@ -7,7 +7,6 @@ import typing as t
 import astroid
 
 from pylint.checkers import BaseChecker
-from pylint.interfaces import IAstroidChecker
 
 ANSIBLE_TEST_MODULES_PATH = os.environ['ANSIBLE_TEST_MODULES_PATH']
 ANSIBLE_TEST_MODULE_UTILS_PATH = os.environ['ANSIBLE_TEST_MODULE_UTILS_PATH']
@@ -57,7 +56,6 @@ def is_module_path(path):  # type: (str) -> bool
 
 class AnsibleUnwantedChecker(BaseChecker):
     """Checker for unwanted imports and functions."""
-    __implements__ = (IAstroidChecker,)
 
     name = 'unwanted'
 
@@ -94,10 +92,7 @@ class AnsibleUnwantedChecker(BaseChecker):
                               )),
 
         # see https://docs.python.org/3/library/collections.abc.html
-        collections=UnwantedEntry('ansible.module_utils.common._collections_compat',
-                                  ignore_paths=(
-                                      '/lib/ansible/module_utils/common/_collections_compat.py',
-                                  ),
+        collections=UnwantedEntry('ansible.module_utils.six.moves.collections_abc',
                                   names=(
                                       'MappingView',
                                       'ItemsView',

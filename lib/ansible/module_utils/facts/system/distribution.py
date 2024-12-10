@@ -3,8 +3,7 @@
 # Copyright: (c) Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import os
 import platform
@@ -31,7 +30,7 @@ def get_uname(module, flags=('-v')):
 
 def _file_exists(path, allow_empty=False):
     # not finding the file, exit early
-    if not os.path.exists(path):
+    if not os.path.isfile(path):
         return False
 
     # if just the path needs to exists (ie, it can be empty) we are done
@@ -47,7 +46,7 @@ def _file_exists(path, allow_empty=False):
 
 
 class DistributionFiles:
-    '''has-a various distro file parsers (os-release, etc) and logic for finding the right one.'''
+    """has-a various distro file parsers (os-release, etc) and logic for finding the right one."""
     # every distribution name mentioned here, must have one of
     #  - allowempty == True
     #  - be listed in SEARCH_STRING
@@ -511,20 +510,20 @@ class Distribution(object):
     # keep keys in sync with Conditionals page of docs
     OS_FAMILY_MAP = {'RedHat': ['RedHat', 'RHEL', 'Fedora', 'CentOS', 'Scientific', 'SLC',
                                 'Ascendos', 'CloudLinux', 'PSBM', 'OracleLinux', 'OVS',
-                                'OEL', 'Amazon', 'Virtuozzo', 'XenServer', 'Alibaba',
+                                'OEL', 'Amazon', 'Amzn', 'Virtuozzo', 'XenServer', 'Alibaba',
                                 'EulerOS', 'openEuler', 'AlmaLinux', 'Rocky', 'TencentOS',
-                                'EuroLinux', 'Kylin Linux Advanced Server'],
+                                'EuroLinux', 'Kylin Linux Advanced Server', 'MIRACLE'],
                      'Debian': ['Debian', 'Ubuntu', 'Raspbian', 'Neon', 'KDE neon',
                                 'Linux Mint', 'SteamOS', 'Devuan', 'Kali', 'Cumulus Linux',
                                 'Pop!_OS', 'Parrot', 'Pardus GNU/Linux', 'Uos', 'Deepin', 'OSMC'],
                      'Suse': ['SuSE', 'SLES', 'SLED', 'openSUSE', 'openSUSE Tumbleweed',
-                              'SLES_SAP', 'SUSE_LINUX', 'openSUSE Leap'],
+                              'SLES_SAP', 'SUSE_LINUX', 'openSUSE Leap', 'ALP-Dolomite', 'SL-Micro'],
                      'Archlinux': ['Archlinux', 'Antergos', 'Manjaro'],
                      'Mandrake': ['Mandrake', 'Mandriva'],
                      'Solaris': ['Solaris', 'Nexenta', 'OmniOS', 'OpenIndiana', 'SmartOS'],
                      'Slackware': ['Slackware'],
                      'Altlinux': ['Altlinux'],
-                     'SGML': ['SGML'],
+                     'SMGL': ['SMGL'],
                      'Gentoo': ['Gentoo', 'Funtoo'],
                      'Alpine': ['Alpine'],
                      'AIX': ['AIX'],

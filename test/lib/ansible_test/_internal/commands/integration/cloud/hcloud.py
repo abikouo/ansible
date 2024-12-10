@@ -29,6 +29,7 @@ from . import (
 
 class HcloudCloudProvider(CloudProvider):
     """Hetzner Cloud provider plugin. Sets up cloud resources before delegation."""
+
     def __init__(self, args: IntegrationConfig) -> None:
         super().__init__(args)
 
@@ -77,12 +78,13 @@ class HcloudCloudProvider(CloudProvider):
         self._write_config(config)
 
     def _create_ansible_core_ci(self) -> AnsibleCoreCI:
-        """Return a Heztner instance of AnsibleCoreCI."""
+        """Return a Hetzner instance of AnsibleCoreCI."""
         return AnsibleCoreCI(self.args, CloudResource(platform='hetzner'))
 
 
 class HcloudCloudEnvironment(CloudEnvironment):
     """Hetzner Cloud cloud environment plugin. Updates integration test environment after delegation."""
+
     def get_environment_config(self) -> CloudEnvironmentConfig:
         """Return environment configuration for use in the test environment after delegation."""
         parser = configparser.ConfigParser()

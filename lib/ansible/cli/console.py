@@ -5,8 +5,7 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 # PYTHON_ARGCOMPLETE_OK
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 # ansible.cli needs to be imported first, to ensure the source bin/* scripts run that code first
 from ansible.cli import CLI
@@ -22,7 +21,7 @@ from ansible import constants as C
 from ansible import context
 from ansible.cli.arguments import option_helpers as opt_help
 from ansible.executor.task_queue_manager import TaskQueueManager
-from ansible.module_utils._text import to_native, to_text
+from ansible.module_utils.common.text.converters import to_native, to_text
 from ansible.module_utils.parsing.convert_bool import boolean
 from ansible.parsing.splitter import parse_kv
 from ansible.playbook.play import Play
@@ -36,30 +35,34 @@ display = Display()
 
 
 class ConsoleCLI(CLI, cmd.Cmd):
-    '''
+    """
        A REPL that allows for running ad-hoc tasks against a chosen inventory
        from a nice shell with built-in tab completion (based on dominis'
-       ansible-shell).
+       ``ansible-shell``).
 
        It supports several commands, and you can modify its configuration at
        runtime:
 
-       - `cd [pattern]`: change host/group (you can use host patterns eg.: app*.dc*:!app01*)
-       - `list`: list available hosts in the current path
-       - `list groups`: list groups included in the current path
-       - `become`: toggle the become flag
-       - `!`: forces shell module instead of the ansible module (!yum update -y)
-       - `verbosity [num]`: set the verbosity level
-       - `forks [num]`: set the number of forks
-       - `become_user [user]`: set the become_user
-       - `remote_user [user]`: set the remote_user
-       - `become_method [method]`: set the privilege escalation method
-       - `check [bool]`: toggle check mode
-       - `diff [bool]`: toggle diff mode
-       - `timeout [integer]`: set the timeout of tasks in seconds (0 to disable)
-       - `help [command/module]`: display documentation for the command or module
-       - `exit`: exit ansible-console
-    '''
+       - ``cd [pattern]``: change host/group
+         (you can use host patterns eg.: ``app*.dc*:!app01*``)
+       - ``list``: list available hosts in the current path
+       - ``list groups``: list groups included in the current path
+       - ``become``: toggle the become flag
+       - ``!``: forces shell module instead of the ansible module
+         (``!yum update -y``)
+       - ``verbosity [num]``: set the verbosity level
+       - ``forks [num]``: set the number of forks
+       - ``become_user [user]``: set the become_user
+       - ``remote_user [user]``: set the remote_user
+       - ``become_method [method]``: set the privilege escalation method
+       - ``check [bool]``: toggle check mode
+       - ``diff [bool]``: toggle diff mode
+       - ``timeout [integer]``: set the timeout of tasks in seconds
+         (0 to disable)
+       - ``help [command/module]``: display documentation for
+         the command or module
+       - ``exit``: exit ``ansible-console``
+    """
 
     name = 'ansible-console'
     modules = []  # type: list[str] | None
@@ -542,7 +545,7 @@ class ConsoleCLI(CLI, cmd.Cmd):
                 if path:
                     module_loader.add_directory(path)
 
-        # dynamically add 'cannonical' modules as commands, aliases coudld be used and dynamically loaded
+        # dynamically add 'canonical' modules as commands, aliases could be used and dynamically loaded
         self.modules = self.list_modules()
         for module in self.modules:
             setattr(self, 'do_' + module, lambda arg, module=module: self.default(module + ' ' + arg))
@@ -576,7 +579,7 @@ class ConsoleCLI(CLI, cmd.Cmd):
         self.cmdloop()
 
     def __getattr__(self, name):
-        ''' handle not found to populate dynamically a module function if module matching name exists '''
+        """ handle not found to populate dynamically a module function if module matching name exists """
         attr = None
 
         if name.startswith('do_'):

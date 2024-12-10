@@ -1,10 +1,9 @@
 # Copyright (c) 2018 Matt Martz <matt@sivel.net>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
-DOCUMENTATION = r'''
+DOCUMENTATION = r"""
     name: toml
     version_added: "2.8"
     short_description: Uses a specific TOML file as an inventory source.
@@ -14,9 +13,9 @@ DOCUMENTATION = r'''
     notes:
         - >
           Requires one of the following python libraries: 'toml', 'tomli', or 'tomllib'
-'''
+"""
 
-EXAMPLES = r'''# fmt: toml
+EXAMPLES = r"""# fmt: toml
 # Example 1
 [all.vars]
 has_java = false
@@ -85,7 +84,7 @@ host4 = {}
 
 [g2.hosts]
 host4 = {}
-'''
+"""
 
 import os
 import typing as t
@@ -94,7 +93,7 @@ from collections.abc import MutableMapping, MutableSequence
 from functools import partial
 
 from ansible.errors import AnsibleFileNotFound, AnsibleParserError, AnsibleRuntimeError
-from ansible.module_utils._text import to_bytes, to_native, to_text
+from ansible.module_utils.common.text.converters import to_bytes, to_native, to_text
 from ansible.module_utils.six import string_types, text_type
 from ansible.parsing.yaml.objects import AnsibleSequence, AnsibleUnicode
 from ansible.plugins.inventory import BaseFileInventoryPlugin
@@ -266,7 +265,7 @@ class InventoryModule(BaseFileInventoryPlugin):
             )
 
     def parse(self, inventory, loader, path, cache=True):
-        ''' parses the inventory file '''
+        """ parses the inventory file """
         if not HAS_TOMLLIB and not HAS_TOML:
             # tomllib works here too, but we don't call it out in the error,
             # since you either have it or not as part of cpython stdlib >= 3.11

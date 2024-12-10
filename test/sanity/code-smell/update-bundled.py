@@ -49,11 +49,8 @@ def get_bundled_libs(paths):
     for filename in fnmatch.filter(paths, 'lib/ansible/compat/*/__init__.py'):
         bundled_libs.add(filename)
 
-    bundled_libs.add('lib/ansible/module_utils/compat/selectors.py')
     bundled_libs.add('lib/ansible/module_utils/distro/__init__.py')
     bundled_libs.add('lib/ansible/module_utils/six/__init__.py')
-    # backports.ssl_match_hostname should be moved to its own file in the future
-    bundled_libs.add('lib/ansible/module_utils/urls.py')
 
     return bundled_libs
 

@@ -15,35 +15,37 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 from ansible import constants as C
 from ansible.errors import AnsibleError, AnsibleParserError, AnsibleUndefinedVariable, AnsibleAssertionError
-from ansible.module_utils._text import to_native
+from ansible.module_utils.common.sentinel import Sentinel
+from ansible.module_utils.common.text.converters import to_native
 from ansible.module_utils.six import string_types
 from ansible.parsing.mod_args import ModuleArgsParser
 from ansible.parsing.yaml.objects import AnsibleBaseYAMLObject, AnsibleMapping
 from ansible.plugins.loader import lookup_loader
-from ansible.playbook.attribute import FieldAttribute, NonInheritableFieldAttribute
+from ansible.playbook.attribute import NonInheritableFieldAttribute
 from ansible.playbook.base import Base
 from ansible.playbook.block import Block
 from ansible.playbook.collectionsearch import CollectionSearch
 from ansible.playbook.conditional import Conditional
+from ansible.playbook.delegatable import Delegatable
 from ansible.playbook.loop_control import LoopControl
+from ansible.playbook.notifiable import Notifiable
 from ansible.playbook.role import Role
 from ansible.playbook.taggable import Taggable
 from ansible.utils.collection_loader import AnsibleCollectionConfig
 from ansible.utils.display import Display
-from ansible.utils.sentinel import Sentinel
+
+from ansible.utils.vars import isidentifier
 
 __all__ = ['Task']
 
 display = Display()
 
 
-class Task(Base, Conditional, Taggable, CollectionSearch):
+class Task(Base, Conditional, Taggable, CollectionSearch, Notifiable, Delegatable):
 
     """
     A task is a language feature that represents a call to a module, with given arguments and other parameters.
@@ -66,28 +68,25 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
     # inheritance is only triggered if the 'current value' is Sentinel,
     # default can be set at play/top level object and inheritance will take it's course.
 
-    args = FieldAttribute(isa='dict', default=dict)
-    action = FieldAttribute(isa='string')
+    args = NonInheritableFieldAttribute(isa='dict', default=dict)
+    action = NonInheritableFieldAttribute(isa='string')
 
-    async_val = FieldAttribute(isa='int', default=0, alias='async')
-    changed_when = FieldAttribute(isa='list', default=list)
-    delay = FieldAttribute(isa='int', default=5)
-    delegate_to = FieldAttribute(isa='string')
-    delegate_facts = FieldAttribute(isa='bool')
-    failed_when = FieldAttribute(isa='list', default=list)
-    loop = FieldAttribute()
+    async_val = NonInheritableFieldAttribute(isa='int', default=0, alias='async')
+    changed_when = NonInheritableFieldAttribute(isa='list', default=list)
+    delay = NonInheritableFieldAttribute(isa='float', default=5)
+    failed_when = NonInheritableFieldAttribute(isa='list', default=list)
+    loop = NonInheritableFieldAttribute(isa='list')
     loop_control = NonInheritableFieldAttribute(isa='class', class_type=LoopControl, default=LoopControl)
-    notify = FieldAttribute(isa='list')
-    poll = FieldAttribute(isa='int', default=C.DEFAULT_POLL_INTERVAL)
-    register = FieldAttribute(isa='string', static=True)
-    retries = FieldAttribute(isa='int', default=3)
-    until = FieldAttribute(isa='list', default=list)
+    poll = NonInheritableFieldAttribute(isa='int', default=C.DEFAULT_POLL_INTERVAL)
+    register = NonInheritableFieldAttribute(isa='string', static=True)
+    retries = NonInheritableFieldAttribute(isa='int')  # default is set in TaskExecutor
+    until = NonInheritableFieldAttribute(isa='list', default=list)
 
     # deprecated, used to be loop and loop_args but loop has been repurposed
     loop_with = NonInheritableFieldAttribute(isa='string', private=True)
 
     def __init__(self, block=None, role=None, task_include=None):
-        ''' constructors a task, without the Task.load classmethod, it will be pretty blank '''
+        """ constructors a task, without the Task.load classmethod, it will be pretty blank """
 
         self._role = role
         self._parent = None
@@ -102,7 +101,7 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
         super(Task, self).__init__()
 
     def get_name(self, include_role_fqcn=True):
-        ''' return the name of the task '''
+        """ return the name of the task """
 
         if self._role:
             role_name = self._role.get_name(include_role_fqcn=include_role_fqcn)
@@ -137,14 +136,14 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
         return t.load_data(data, variable_manager=variable_manager, loader=loader)
 
     def __repr__(self):
-        ''' returns a human readable representation of the task '''
+        """ returns a human-readable representation of the task """
         if self.action in C._ACTION_META:
             return "TASK: meta (%s)" % self.args['_raw_params']
         else:
             return "TASK: %s" % self.get_name()
 
     def _preprocess_with_loop(self, ds, new_ds, k, v):
-        ''' take a lookup plugin name and store it correctly '''
+        """ take a lookup plugin name and store it correctly """
 
         loop_name = k.removeprefix("with_")
         if new_ds.get('loop') is not None or new_ds.get('loop_with') is not None:
@@ -157,10 +156,10 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
         #                    version="2.10", collection_name='ansible.builtin')
 
     def preprocess_data(self, ds):
-        '''
+        """
         tasks are especially complex arguments so need pre-processing.
         keep it short.
-        '''
+        """
 
         if not isinstance(ds, dict):
             raise AnsibleAssertionError('ds (%s) should be a dict but was a %s' % (ds, type(ds)))
@@ -211,6 +210,7 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
             # But if it wasn't, we can add the yaml object now to get more detail
             raise AnsibleParserError(to_native(e), obj=ds, orig_exc=e)
         else:
+            # Set the resolved action plugin (or if it does not exist, module) for callbacks.
             self.resolved_action = args_parser.resolved_action
 
         # the command/shell/script modules used to support the `cmd` arg,
@@ -276,11 +276,15 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
         if not isinstance(value, list):
             setattr(self, name, [value])
 
+    def _validate_register(self, attr, name, value):
+        if value is not None and not isidentifier(value):
+            raise AnsibleParserError(f"Invalid variable name in 'register' specified: '{value}'")
+
     def post_validate(self, templar):
-        '''
+        """
         Override of base class post_validate, to also do final validation on
         the block and task include (if any) to which this task belongs.
-        '''
+        """
 
         if self._parent:
             self._parent.post_validate(templar)
@@ -291,17 +295,17 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
         super(Task, self).post_validate(templar)
 
     def _post_validate_loop(self, attr, value, templar):
-        '''
+        """
         Override post validation for the loop field, which is templated
         specially in the TaskExecutor class when evaluating loops.
-        '''
+        """
         return value
 
     def _post_validate_environment(self, attr, value, templar):
-        '''
+        """
         Override post validation of vars on the play, as we don't want to
         template these too early.
-        '''
+        """
         env = {}
         if value is not None:
 
@@ -339,24 +343,24 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
         return env
 
     def _post_validate_changed_when(self, attr, value, templar):
-        '''
+        """
         changed_when is evaluated after the execution of the task is complete,
         and should not be templated during the regular post_validate step.
-        '''
+        """
         return value
 
     def _post_validate_failed_when(self, attr, value, templar):
-        '''
+        """
         failed_when is evaluated after the execution of the task is complete,
         and should not be templated during the regular post_validate step.
-        '''
+        """
         return value
 
     def _post_validate_until(self, attr, value, templar):
-        '''
+        """
         until is evaluated after the execution of the task is complete,
         and should not be templated during the regular post_validate step.
-        '''
+        """
         return value
 
     def get_vars(self):
@@ -446,11 +450,11 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
         super(Task, self).deserialize(data)
 
     def set_loader(self, loader):
-        '''
+        """
         Sets the loader on this object and recursively on parent, child objects.
         This is used primarily after the Task has been serialized/deserialized, which
         does not preserve the loader.
-        '''
+        """
 
         self._loader = loader
 
@@ -458,9 +462,9 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
             self._parent.set_loader(loader)
 
     def _get_parent_attribute(self, attr, omit=False):
-        '''
+        """
         Generic logic to get the attribute or parent attribute for a task value.
-        '''
+        """
         fattr = self.fattributes[attr]
 
         extend = fattr.extend
@@ -509,3 +513,9 @@ class Task(Base, Conditional, Taggable, CollectionSearch):
                 return self._parent
             return self._parent.get_first_parent_include()
         return None
+
+    def get_play(self):
+        parent = self._parent
+        while not isinstance(parent, Block):
+            parent = parent._parent
+        return parent._play

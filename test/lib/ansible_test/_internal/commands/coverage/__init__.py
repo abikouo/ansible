@@ -36,7 +36,7 @@ from ...python_requirements import (
     install_requirements,
 )
 
-from ... target import (
+from ...target import (
     walk_module_targets,
 )
 
@@ -68,6 +68,7 @@ COVERAGE_OUTPUT_FILE_NAME = 'coverage'
 
 class CoverageConfig(EnvironmentConfig):
     """Configuration for the coverage command."""
+
     def __init__(self, args: t.Any) -> None:
         super().__init__(args, 'coverage')
 
@@ -96,7 +97,7 @@ def initialize_coverage(args: CoverageConfig, host_state: HostState) -> coverage
 def run_coverage(args: CoverageConfig, host_state: HostState, output_file: str, command: str, cmd: list[str]) -> None:
     """Run the coverage cli tool with the specified options."""
     env = common_environment()
-    env.update(dict(COVERAGE_FILE=output_file))
+    env.update(COVERAGE_FILE=output_file)
 
     cmd = ['python', '-m', 'coverage.__main__', command, '--rcfile', COVERAGE_CONFIG_PATH] + cmd
 
@@ -158,11 +159,11 @@ def get_python_modules() -> dict[str, str]:
 
 
 def enumerate_python_arcs(
-        path: str,
-        coverage: coverage_module,
-        modules: dict[str, str],
-        collection_search_re: t.Optional[t.Pattern],
-        collection_sub_re: t.Optional[t.Pattern],
+    path: str,
+    coverage: coverage_module,
+    modules: dict[str, str],
+    collection_search_re: t.Optional[t.Pattern],
+    collection_sub_re: t.Optional[t.Pattern],
 ) -> c.Generator[tuple[str, set[tuple[int, int]]], None, None]:
     """Enumerate Python code coverage arcs in the given file."""
     if os.path.getsize(path) == 0:
@@ -227,7 +228,7 @@ def read_python_coverage_legacy(path: str) -> PythonArcs:
         contents = read_text_file(path)
         contents = re.sub(r'''^!coverage.py: This is a private format, don't read it directly!''', '', contents)
         data = json.loads(contents)
-        arcs: PythonArcs = {filename: [tuple(arc) for arc in arcs] for filename, arcs in data['arcs'].items()}
+        arcs: PythonArcs = {filename: [t.cast(tuple[int, int], tuple(arc)) for arc in arc_list] for filename, arc_list in data['arcs'].items()}
     except Exception as ex:
         raise CoverageError(path, f'Error reading JSON coverage file: {ex}') from ex
 
@@ -235,9 +236,9 @@ def read_python_coverage_legacy(path: str) -> PythonArcs:
 
 
 def enumerate_powershell_lines(
-        path: str,
-        collection_search_re: t.Optional[t.Pattern],
-        collection_sub_re: t.Optional[t.Pattern],
+    path: str,
+    collection_search_re: t.Optional[t.Pattern],
+    collection_sub_re: t.Optional[t.Pattern],
 ) -> c.Generator[tuple[str, dict[int, int]], None, None]:
     """Enumerate PowerShell code coverage lines in the given file."""
     if os.path.getsize(path) == 0:
@@ -274,10 +275,10 @@ def enumerate_powershell_lines(
 
 
 def sanitize_filename(
-        filename: str,
-        modules: t.Optional[dict[str, str]] = None,
-        collection_search_re: t.Optional[t.Pattern] = None,
-        collection_sub_re: t.Optional[t.Pattern] = None,
+    filename: str,
+    modules: t.Optional[dict[str, str]] = None,
+    collection_search_re: t.Optional[t.Pattern] = None,
+    collection_sub_re: t.Optional[t.Pattern] = None,
 ) -> t.Optional[str]:
     """Convert the given code coverage path to a local absolute path and return its, or None if the path is not valid."""
     ansible_path = os.path.abspath('lib/ansible/') + '/'
@@ -290,6 +291,11 @@ def sanitize_filename(
     if '/ansible_modlib.zip/ansible/' in filename:
         # Rewrite the module_utils path from the remote host to match the controller. Ansible 2.6 and earlier.
         new_name = re.sub('^.*/ansible_modlib.zip/ansible/', ansible_path, filename)
+        display.info('%s -> %s' % (filename, new_name), verbosity=3)
+        filename = new_name
+    elif integration_temp_path in filename:
+        # Rewrite the path of code running from an integration test temporary directory.
+        new_name = re.sub(r'^.*' + re.escape(integration_temp_path) + '[^/]+/', root_path, filename)
         display.info('%s -> %s' % (filename, new_name), verbosity=3)
         filename = new_name
     elif collection_search_re and collection_search_re.search(filename):
@@ -327,11 +333,6 @@ def sanitize_filename(
         new_name = re.sub('^(/.*?)?/root/ansible/', root_path, filename)
         display.info('%s -> %s' % (filename, new_name), verbosity=3)
         filename = new_name
-    elif integration_temp_path in filename:
-        # Rewrite the path of code running from an integration test temporary directory.
-        new_name = re.sub(r'^.*' + re.escape(integration_temp_path) + '[^/]+/', root_path, filename)
-        display.info('%s -> %s' % (filename, new_name), verbosity=3)
-        filename = new_name
 
     filename = os.path.abspath(filename)  # make sure path is absolute (will be relative if previously exported)
 
@@ -340,6 +341,7 @@ def sanitize_filename(
 
 class PathChecker:
     """Checks code coverage paths to verify they are valid and reports on the findings."""
+
     def __init__(self, args: CoverageConfig, collection_search_re: t.Optional[t.Pattern] = None) -> None:
         self.args = args
         self.collection_search_re = collection_search_re

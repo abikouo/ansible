@@ -15,9 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 import errno
 import fcntl
@@ -55,7 +53,7 @@ except ImportError:
 from ansible.errors import AnsibleError, AnsibleAssertionError
 from ansible import constants as C
 from ansible.module_utils.six import binary_type
-from ansible.module_utils._text import to_bytes, to_text, to_native
+from ansible.module_utils.common.text.converters import to_bytes, to_text, to_native
 from ansible.utils.display import Display
 from ansible.utils.path import makedirs_safe, unfrackpath
 
@@ -63,8 +61,8 @@ display = Display()
 
 
 b_HEADER = b'$ANSIBLE_VAULT'
-CIPHER_WHITELIST = frozenset((u'AES256',))
-CIPHER_WRITE_WHITELIST = frozenset((u'AES256',))
+CIPHER_ALLOWLIST = frozenset((u'AES256',))
+CIPHER_WRITE_ALLOWLIST = frozenset((u'AES256',))
 # See also CIPHER_MAPPING at the bottom of the file which maps cipher strings
 # (used in VaultFile header) to a cipher class
 
@@ -105,15 +103,17 @@ def is_encrypted(data):
     return False
 
 
-def is_encrypted_file(file_obj, start_pos=0, count=-1):
+def is_encrypted_file(file_obj, start_pos=0, count=len(b_HEADER)):
     """Test if the contents of a file obj are a vault encrypted data blob.
 
     :arg file_obj: A file object that will be read from.
     :kwarg start_pos: A byte offset in the file to start reading the header
         from.  Defaults to 0, the beginning of the file.
     :kwarg count: Read up to this number of bytes from the file to determine
-        if it looks like encrypted vault data.  The default is -1, read to the
-        end of file.
+        if it looks like encrypted vault data. The default is the size of the
+        the vault header, which is what is needed most times.
+        For some IO classes, or files that don't begin with the vault itself,
+        set to -1 to read to the end of file.
     :returns: True if the file looks like a vault file. Otherwise, False.
     """
     # read the header and reset the file stream to where it started
@@ -253,19 +253,19 @@ def parse_vaulttext(b_vaulttext):
 
 
 def verify_secret_is_not_empty(secret, msg=None):
-    '''Check the secret against minimal requirements.
+    """Check the secret against minimal requirements.
 
     Raises: AnsibleVaultPasswordError if the password does not meet requirements.
 
     Currently, only requirement is that the password is not None or an empty string.
-    '''
+    """
     msg = msg or 'Invalid vault password was provided'
     if not secret:
         raise AnsibleVaultPasswordError(msg)
 
 
 class VaultSecret:
-    '''Opaque/abstract objects for a single vault secret. ie, a password or a key.'''
+    """Opaque/abstract objects for a single vault secret. ie, a password or a key."""
 
     def __init__(self, _bytes=None):
         # FIXME: ? that seems wrong... Unset etc?
@@ -273,10 +273,10 @@ class VaultSecret:
 
     @property
     def bytes(self):
-        '''The secret as a bytestring.
+        """The secret as a bytestring.
 
         Sub classes that store text types will need to override to encode the text to bytes.
-        '''
+        """
         return self._bytes
 
     def load(self):
@@ -335,7 +335,7 @@ class PromptVaultSecret(VaultSecret):
 
 
 def script_is_client(filename):
-    '''Determine if a vault secret script is a client script that can be given --vault-id args'''
+    """Determine if a vault secret script is a client script that can be given --vault-id args"""
 
     # if password script is 'something-client' or 'something-client.[sh|py|rb|etc]'
     # script_name can still have '.' or could be entire filename if there is no ext
@@ -349,7 +349,7 @@ def script_is_client(filename):
 
 
 def get_file_vault_secret(filename=None, vault_id=None, encoding=None, loader=None):
-    ''' Get secret from file content or execute file and get secret from stdout '''
+    """ Get secret from file content or execute file and get secret from stdout """
 
     # we unfrack but not follow the full path/context to possible vault script
     # so when the script uses 'adjacent' file for configuration or similar
@@ -358,6 +358,9 @@ def get_file_vault_secret(filename=None, vault_id=None, encoding=None, loader=No
     this_path = unfrackpath(filename, follow=False)
     if not os.path.exists(this_path):
         raise AnsibleError("The vault password file %s was not found" % this_path)
+
+    if os.path.isdir(this_path):
+        raise AnsibleError(f"The vault password file provided '{this_path}' can not be a directory")
 
     # it is a script?
     if loader.is_executable(this_path):
@@ -516,7 +519,7 @@ class ClientScriptVaultSecret(ScriptVaultSecret):
 
 
 def match_secrets(secrets, target_vault_ids):
-    '''Find all VaultSecret objects that are mapped to any of the target_vault_ids in secrets'''
+    """Find all VaultSecret objects that are mapped to any of the target_vault_ids in secrets"""
     if not secrets:
         return []
 
@@ -525,10 +528,10 @@ def match_secrets(secrets, target_vault_ids):
 
 
 def match_best_secret(secrets, target_vault_ids):
-    '''Find the best secret from secrets that matches target_vault_ids
+    """Find the best secret from secrets that matches target_vault_ids
 
     Since secrets should be ordered so the early secrets are 'better' than later ones, this
-    just finds all the matches, then returns the first secret'''
+    just finds all the matches, then returns the first secret"""
     matches = match_secrets(secrets, target_vault_ids)
     if matches:
         return matches[0]
@@ -557,7 +560,7 @@ def match_encrypt_vault_id_secret(secrets, encrypt_vault_id=None):
 
 
 def match_encrypt_secret(secrets, encrypt_vault_id=None):
-    '''Find the best/first/only secret in secrets to use for encrypting'''
+    """Find the best/first/only secret in secrets to use for encrypting"""
 
     display.vvvv(u'encrypt_vault_id=%s' % to_text(encrypt_vault_id))
     # See if the --encrypt-vault-id matches a vault-id
@@ -608,7 +611,7 @@ class VaultLib:
         if is_encrypted(b_plaintext):
             raise AnsibleError("input is already encrypted")
 
-        if not self.cipher_name or self.cipher_name not in CIPHER_WRITE_WHITELIST:
+        if not self.cipher_name or self.cipher_name not in CIPHER_WRITE_ALLOWLIST:
             self.cipher_name = u"AES256"
 
         try:
@@ -631,7 +634,7 @@ class VaultLib:
         return b_vaulttext
 
     def decrypt(self, vaulttext, filename=None, obj=None):
-        '''Decrypt a piece of vault encrypted data.
+        """Decrypt a piece of vault encrypted data.
 
         :arg vaulttext: a string to decrypt.  Since vault encrypted data is an
             ascii text format this can be either a byte str or unicode string.
@@ -640,7 +643,7 @@ class VaultLib:
             decrypted.
         :returns: a byte string containing the decrypted data and the vault-id that was used
 
-        '''
+        """
         plaintext, vault_id, vault_secret = self.decrypt_and_get_vault_id(vaulttext, filename=filename, obj=obj)
         return plaintext
 
@@ -658,7 +661,10 @@ class VaultLib:
         b_vaulttext = to_bytes(vaulttext, errors='strict', encoding='utf-8')
 
         if self.secrets is None:
-            raise AnsibleVaultError("A vault password must be specified to decrypt data")
+            msg = "A vault password must be specified to decrypt data"
+            if filename:
+                msg += " in file %s" % to_native(filename)
+            raise AnsibleVaultError(msg)
 
         if not is_encrypted(b_vaulttext):
             msg = "input is not vault encrypted data. "
@@ -670,7 +676,7 @@ class VaultLib:
 
         # create the cipher object, note that the cipher used for decrypt can
         # be different than the cipher used for encrypt
-        if cipher_name in CIPHER_WHITELIST:
+        if cipher_name in CIPHER_ALLOWLIST:
             this_cipher = CIPHER_MAPPING[cipher_name]()
         else:
             raise AnsibleError("{0} cipher could not be found".format(cipher_name))
@@ -784,13 +790,13 @@ class VaultEditor:
 
             passes = 3
             with open(tmp_path, "wb") as fh:
-                for _ in range(passes):
+                for dummy in range(passes):
                     fh.seek(0, 0)
                     # get a random chunk of data, each pass with other length
                     chunk_len = random.randint(max_chunk_len // 2, max_chunk_len)
                     data = os.urandom(chunk_len)
 
-                    for _ in range(0, file_len // chunk_len):
+                    for dummy in range(0, file_len // chunk_len):
                         fh.write(data)
                     fh.write(data[:file_len % chunk_len])
 
@@ -957,7 +963,7 @@ class VaultEditor:
         # (vault_id=default, while a different vault-id decrypted)
 
         # we want to get rid of files encrypted with the AES cipher
-        force_save = (cipher_name not in CIPHER_WRITE_WHITELIST)
+        force_save = (cipher_name not in CIPHER_WRITE_ALLOWLIST)
 
         # Keep the same vault-id (and version) as in the header
         self._edit_file_helper(filename, vault_secret_used, existing_data=plaintext, force_save=force_save, vault_id=vault_id)
@@ -1041,10 +1047,10 @@ class VaultEditor:
         since in the plaintext case, the original contents can be of any text encoding
         or arbitrary binary data.
 
-        When used to write the result of vault encryption, the val of the 'data' arg
-        should be a utf-8 encoded byte string and not a text typ and not a text type..
+        When used to write the result of vault encryption, the value of the 'data' arg
+        should be a utf-8 encoded byte string and not a text type.
 
-        When used to write the result of vault decryption, the val of the 'data' arg
+        When used to write the result of vault decryption, the value of the 'data' arg
         should be a byte string and not a text type.
 
         :arg data: the byte string (bytes) data
@@ -1074,6 +1080,8 @@ class VaultEditor:
             output = getattr(sys.stdout, 'buffer', sys.stdout)
             output.write(b_file_data)
         else:
+            if not os.access(os.path.dirname(thefile), os.W_OK):
+                raise AnsibleError("Destination '%s' not writable" % (os.path.dirname(thefile)))
             # file names are insecure and prone to race conditions, so remove and create securely
             if os.path.isfile(thefile):
                 if shred:

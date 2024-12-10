@@ -2,13 +2,12 @@
 
 # Copyright: (c) 2017, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 
 class ModuleDocFragment(object):
 
-    DOCUMENTATION = r'''
+    DOCUMENTATION = r"""
     options:
       result_format:
         name: Format of the task result
@@ -30,15 +29,15 @@ class ModuleDocFragment(object):
       pretty_results:
         name: Configure output for readability
         description:
-          - Configure the result format to be more readable
-          - When the result format is set to C(yaml) this option defaults to C(True), and defaults
-            to C(False) when configured to C(json).
-          - Setting this option to C(True) will force C(json) and C(yaml) results to always be pretty
+          - Configure the result format to be more readable.
+          - When O(result_format) is set to V(yaml) this option defaults to V(true), and defaults
+            to V(false) when configured to V(json).
+          - Setting this option to V(true) will force V(json) and V(yaml) results to always be pretty
             printed regardless of verbosity.
-          - When set to C(True) and used with the C(yaml) result format, this option will
+          - When set to V(true) and used with the V(yaml) result format, this option will
             modify module responses in an attempt to produce a more human friendly output at the expense
             of correctness, and should not be relied upon to aid in writing variable manipulations
-            or conditionals. For correctness, set this option to C(False) or set the result format to C(json).
+            or conditionals. For correctness, set this option to V(false) or set O(result_format) to V(json).
         type: bool
         default: null
         env:
@@ -47,4 +46,4 @@ class ModuleDocFragment(object):
           - key: callback_format_pretty
             section: defaults
         version_added: '2.13'
-'''
+"""

@@ -2,17 +2,16 @@
 # Copyright: (c) 2017, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import absolute_import, division, print_function
-__metaclass__ = type
+from __future__ import annotations
 
 
-DOCUMENTATION = r'''
+DOCUMENTATION = r"""
 ---
 module: stat
 version_added: "1.3"
 short_description: Retrieve file or file system status
 description:
-     - Retrieves facts for a file similar to the Linux/Unix 'stat' command.
+     - Retrieves facts for a file similar to the Linux/Unix C(stat) command.
      - For Windows targets, use the M(ansible.windows.win_stat) module instead.
 options:
   path:
@@ -26,29 +25,12 @@ options:
       - Whether to follow symlinks.
     type: bool
     default: no
-  get_checksum:
-    description:
-      - Whether to return a checksum of the file.
-    type: bool
-    default: yes
-    version_added: "1.8"
-  checksum_algorithm:
-    description:
-      - Algorithm to determine checksum of file.
-      - Will throw an error if the host is unable to use specified algorithm.
-      - The remote host has to support the hashing method specified, C(md5)
-        can be unavailable if the host is FIPS-140 compliant.
-    type: str
-    choices: [ md5, sha1, sha224, sha256, sha384, sha512 ]
-    default: sha1
-    aliases: [ checksum, checksum_algo ]
-    version_added: "2.0"
   get_mime:
     description:
-      - Use file magic and return data about the nature of the file. this uses
-        the 'file' utility found on most Linux/Unix systems.
-      - This will add both C(mime_type) and C(charset) fields to the return, if possible.
-      - In Ansible 2.3 this option changed from I(mime) to I(get_mime) and the default changed to C(true).
+      - Use file magic and return data about the nature of the file. This uses
+        the C(file) utility found on most Linux/Unix systems.
+      - This will add both RV(stat.mimetype) and RV(stat.charset) fields to the return, if possible.
+      - In Ansible 2.3 this option changed from O(mime) to O(get_mime) and the default changed to V(true).
     type: bool
     default: yes
     aliases: [ mime, mime_type, mime-type ]
@@ -60,8 +42,11 @@ options:
     default: yes
     aliases: [ attr, attributes ]
     version_added: "2.3"
+  get_checksum:
+    version_added: "1.8"
 extends_documentation_fragment:
   -  action_common_attributes
+  -  checksum_common
 attributes:
     check_mode:
         support: full
@@ -73,9 +58,9 @@ seealso:
 - module: ansible.builtin.file
 - module: ansible.windows.win_stat
 author: Bruce Pennypacker (@bpennypacker)
-'''
+"""
 
-EXAMPLES = r'''
+EXAMPLES = r"""
 # Obtain the stats of /etc/foo.conf, and check that the file still belongs
 # to 'root'. Fail otherwise.
 - name: Get stats of a file
@@ -138,13 +123,13 @@ EXAMPLES = r'''
   ansible.builtin.stat:
     path: /path/to/something
     checksum_algorithm: sha256
-'''
+"""
 
-RETURN = r'''
+RETURN = r"""
 stat:
     description: Dictionary containing all the stat data, some platforms might add additional fields.
     returned: success
-    type: complex
+    type: dict
     contains:
         exists:
             description: If the destination path actually exists or not
@@ -307,13 +292,6 @@ stat:
             type: str
             sample: ../foobar/21102015-1445431274-908472971
             version_added: 2.4
-        md5:
-            description: md5 hash of the file; this will be removed in Ansible 2.9 in
-                favor of the checksum return value
-            returned: success, path exists and user can read stats and path
-                supports hashing and md5 is supported
-            type: str
-            sample: f88fa92d8cf2eeecf4c0a50ccc96d0c0
         checksum:
             description: hash of the file
             returned: success, path exists, user can read stats, path supports
@@ -333,15 +311,15 @@ stat:
         mimetype:
             description: file magic data or mime-type
             returned: success, path exists and user can read stats and
-                installed python supports it and the I(mime) option was true, will
-                return C(unknown) on error.
+                installed python supports it and the O(get_mime) option was V(true), will
+                return V(unknown) on error.
             type: str
             sample: application/pdf; charset=binary
         charset:
             description: file character set or encoding
             returned: success, path exists and user can read stats and
-                installed python supports it and the I(mime) option was true, will
-                return C(unknown) on error.
+                installed python supports it and the O(get_mime) option was V(true), will
+                return V(unknown) on error.
             type: str
             sample: us-ascii
         readable:
@@ -374,7 +352,7 @@ stat:
             type: str
             sample: "381700746"
             version_added: 2.3
-'''
+"""
 
 import errno
 import grp
@@ -384,7 +362,7 @@ import stat
 
 # import module snippets
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils._text import to_bytes
+from ansible.module_utils.common.text.converters import to_bytes
 
 
 def format_output(module, path, st):
@@ -454,7 +432,6 @@ def main():
         argument_spec=dict(
             path=dict(type='path', required=True, aliases=['dest', 'name']),
             follow=dict(type='bool', default=False),
-            get_md5=dict(type='bool', default=False),
             get_checksum=dict(type='bool', default=True),
             get_mime=dict(type='bool', default=True, aliases=['mime', 'mime_type', 'mime-type']),
             get_attributes=dict(type='bool', default=True, aliases=['attr', 'attributes']),
@@ -472,10 +449,6 @@ def main():
     get_attr = module.params.get('get_attributes')
     get_checksum = module.params.get('get_checksum')
     checksum_algorithm = module.params.get('checksum_algorithm')
-
-    # NOTE: undocumented option since 2.9 to be removed at a later date if possible (3.0+)
-    # no real reason for keeping other than fear we may break older content.
-    get_md5 = module.params.get('get_md5')
 
     # main stat data
     try:
@@ -516,15 +489,6 @@ def main():
 
     # checksums
     if output.get('isreg') and output.get('readable'):
-
-        # NOTE: see above about get_md5
-        if get_md5:
-            # Will fail on FIPS-140 compliant systems
-            try:
-                output['md5'] = module.md5(b_path)
-            except ValueError:
-                output['md5'] = None
-
         if get_checksum:
             output['checksum'] = module.digest_from_file(b_path, checksum_algorithm)
 

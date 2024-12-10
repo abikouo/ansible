@@ -29,7 +29,7 @@ from contextlib import contextmanager
 from ansible.executor.powershell.module_manifest import PSModuleDepFinder
 from ansible.module_utils.basic import FILE_COMMON_ARGUMENTS, AnsibleModule
 from ansible.module_utils.six import reraise
-from ansible.module_utils._text import to_bytes, to_text
+from ansible.module_utils.common.text.converters import to_bytes, to_text
 
 from .utils import CaptureStd, find_executable, get_module_name_from_filename
 
@@ -167,10 +167,3 @@ def get_py_argument_spec(filename, collection):
         return argument_spec, fake.kwargs
     except (TypeError, IndexError):
         return {}, {}
-
-
-def get_argument_spec(filename, collection):
-    if filename.endswith('.py'):
-        return get_py_argument_spec(filename, collection)
-    else:
-        return get_ps_argument_spec(filename, collection)

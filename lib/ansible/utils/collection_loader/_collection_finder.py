@@ -4,22 +4,19 @@
 # CAUTION: This implementation of the collection loader is used by ansible-test.
 #          Because of this, it must be compatible with all Python versions supported on the controller or remote.
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
+import itertools
 import os
 import os.path
-import pkgutil
 import re
 import sys
 from keyword import iskeyword
-from tokenize import Name as _VALID_IDENTIFIER_REGEX
 
 
 # DO NOT add new non-stdlib import deps here, this loader is used by external tools (eg ansible-test import sanity)
 # that only allow stdlib and module_utils
 from ansible.module_utils.common.text.converters import to_native, to_text, to_bytes
-from ansible.module_utils.six import string_types, PY3
 from ._collection_config import AnsibleCollectionConfig
 
 from contextlib import contextmanager
@@ -32,14 +29,26 @@ except ImportError:
         __import__(name)
         return sys.modules[name]
 
-try:
-    from importlib import reload as reload_module
-except ImportError:
-    # 2.7 has a global reload function instead...
-    reload_module = reload  # type: ignore[name-defined]  # pylint:disable=undefined-variable
+from importlib import reload as reload_module
 
 try:
-    from importlib.util import spec_from_loader
+    try:
+        # Available on Python >= 3.11
+        # We ignore the import error that will trigger when running mypy with
+        # older Python versions.
+        from importlib.resources.abc import TraversableResources  # type: ignore[import]
+    except ImportError:
+        # Used with Python 3.9 and 3.10 only
+        # This member is still available as an alias up until Python 3.14 but
+        # is deprecated as of Python 3.12.
+        from importlib.abc import TraversableResources  # deprecated: description='TraversableResources move' python_version='3.10'
+except ImportError:
+    # Python < 3.9
+    # deprecated: description='TraversableResources fallback' python_version='3.8'
+    TraversableResources = object  # type: ignore[assignment,misc]
+
+try:
+    from importlib.util import find_spec, spec_from_loader
 except ImportError:
     pass
 
@@ -50,34 +59,155 @@ except ImportError:
 else:
     HAS_FILE_FINDER = True
 
+try:
+    import pathlib
+except ImportError:
+    pass
+
 # NB: this supports import sanity test providing a different impl
 try:
     from ._collection_meta import _meta_yml_to_dict
 except ImportError:
     _meta_yml_to_dict = None
 
-
-if not hasattr(__builtins__, 'ModuleNotFoundError'):
-    # this was introduced in Python 3.6
-    ModuleNotFoundError = ImportError
-
-
-_VALID_IDENTIFIER_STRING_REGEX = re.compile(
-    ''.join((_VALID_IDENTIFIER_REGEX, r'\Z')),
-)
-
-
-try:  # NOTE: py3/py2 compat
-    # py2 mypy can't deal with try/excepts
-    is_python_identifier = str.isidentifier  # type: ignore[attr-defined]
-except AttributeError:  # Python 2
-    def is_python_identifier(self):  # type: (str) -> bool
-        """Determine whether the given string is a Python identifier."""
-        # Ref: https://stackoverflow.com/a/55802320/595220
-        return bool(re.match(_VALID_IDENTIFIER_STRING_REGEX, self))
-
+is_python_identifier = str.isidentifier  # type: ignore[attr-defined]
 
 PB_EXTENSIONS = ('.yml', '.yaml')
+SYNTHETIC_PACKAGE_NAME = '<ansible_synthetic_collection_package>'
+
+
+class _AnsibleNSTraversable:
+    """Class that implements the ``importlib.resources.abc.Traversable``
+    interface for the following ``ansible_collections`` namespace packages::
+
+    * ``ansible_collections``
+    * ``ansible_collections.<namespace>``
+
+    These namespace packages operate differently from a normal Python
+    namespace package, in that the same namespace can be distributed across
+    multiple directories on the filesystem and still function as a single
+    namespace, such as::
+
+    * ``/usr/share/ansible/collections/ansible_collections/ansible/posix/``
+    * ``/home/user/.ansible/collections/ansible_collections/ansible/windows/``
+
+    This class will mimic the behavior of various ``pathlib.Path`` methods,
+    by combining the results of multiple root paths into the output.
+
+    This class does not do anything to remove duplicate collections from the
+    list, so when traversing either namespace patterns supported by this class,
+    it is possible to have the same collection located in multiple root paths,
+    but precedence rules only use one. When iterating or traversing these
+    package roots, there is the potential to see the same collection in
+    multiple places without indication of which would be used. In such a
+    circumstance, it is best to then call ``importlib.resources.files`` for an
+    individual collection package rather than continuing to traverse from the
+    namespace package.
+
+    Several methods will raise ``NotImplementedError`` as they do not make
+    sense for these namespace packages.
+    """
+    def __init__(self, *paths):
+        self._paths = [pathlib.Path(p) for p in paths]
+
+    def __repr__(self):
+        return "_AnsibleNSTraversable('%s')" % "', '".join(map(to_text, self._paths))
+
+    def iterdir(self):
+        return itertools.chain.from_iterable(p.iterdir() for p in self._paths if p.is_dir())
+
+    def is_dir(self):
+        return any(p.is_dir() for p in self._paths)
+
+    def is_file(self):
+        return False
+
+    def glob(self, pattern):
+        return itertools.chain.from_iterable(p.glob(pattern) for p in self._paths if p.is_dir())
+
+    def _not_implemented(self, *args, **kwargs):
+        raise NotImplementedError('not usable on namespaces')
+
+    joinpath = __truediv__ = read_bytes = read_text = _not_implemented
+
+
+class _AnsibleTraversableResources(TraversableResources):
+    """Implements ``importlib.resources.abc.TraversableResources`` for the
+    collection Python loaders.
+
+    The result of ``files`` will depend on whether a particular collection, or
+    a sub package of a collection was referenced, as opposed to
+    ``ansible_collections`` or a particular namespace. For a collection and
+    its subpackages, a ``pathlib.Path`` instance will be returned, whereas
+    for the higher level namespace packages, ``_AnsibleNSTraversable``
+    will be returned.
+    """
+    def __init__(self, package, loader):
+        self._package = package
+        self._loader = loader
+
+    def _get_name(self, package):
+        try:
+            # spec
+            return package.name
+        except AttributeError:
+            # module
+            return package.__name__
+
+    def _get_package(self, package):
+        try:
+            # spec
+            return package.__parent__
+        except AttributeError:
+            # module
+            return package.__package__
+
+    def _get_path(self, package):
+        try:
+            # spec
+            return package.origin
+        except AttributeError:
+            # module
+            return package.__file__
+
+    def _is_ansible_ns_package(self, package):
+        origin = getattr(package, 'origin', None)
+        if not origin:
+            return False
+
+        if origin == SYNTHETIC_PACKAGE_NAME:
+            return True
+
+        module_filename = os.path.basename(origin)
+        return module_filename in {'__synthetic__', '__init__.py'}
+
+    def _ensure_package(self, package):
+        if self._is_ansible_ns_package(package):
+            # Short circuit our loaders
+            return
+        if self._get_package(package) != package.__name__:
+            raise TypeError('%r is not a package' % package.__name__)
+
+    def files(self):
+        package = self._package
+        parts = package.split('.')
+        is_ns = parts[0] == 'ansible_collections' and len(parts) < 3
+
+        if isinstance(package, str):
+            if is_ns:
+                # Don't use ``spec_from_loader`` here, because that will point
+                # to exactly 1 location for a namespace. Use ``find_spec``
+                # to get a list of all locations for the namespace
+                package = find_spec(package)
+            else:
+                package = spec_from_loader(package, self._loader)
+        elif not isinstance(package, ModuleType):
+            raise TypeError('Expected string or module, got %r' % package.__class__.__name__)
+
+        self._ensure_package(package)
+        if is_ns:
+            return _AnsibleNSTraversable(*package.submodule_search_locations)
+        return pathlib.Path(self._get_path(package)).parent
 
 
 class _AnsibleCollectionFinder:
@@ -85,7 +215,7 @@ class _AnsibleCollectionFinder:
         # TODO: accept metadata loader override
         self._ansible_pkg_path = to_native(os.path.dirname(to_bytes(sys.modules['ansible'].__file__)))
 
-        if isinstance(paths, string_types):
+        if isinstance(paths, str):
             paths = [paths]
         elif paths is None:
             paths = []
@@ -170,7 +300,7 @@ class _AnsibleCollectionFinder:
         return paths
 
     def set_playbook_paths(self, playbook_paths):
-        if isinstance(playbook_paths, string_types):
+        if isinstance(playbook_paths, str):
             playbook_paths = [playbook_paths]
 
         # track visited paths; we have to preserve the dir order as-passed in case there are duplicate collections (first one wins)
@@ -256,19 +386,17 @@ class _AnsiblePathHookFinder:
         # when called from a path_hook, find_module doesn't usually get the path arg, so this provides our context
         self._pathctx = to_native(pathctx)
         self._collection_finder = collection_finder
-        if PY3:
-            # cache the native FileFinder (take advantage of its filesystem cache for future find/load requests)
-            self._file_finder = None
+        # cache the native FileFinder (take advantage of its filesystem cache for future find/load requests)
+        self._file_finder = None
 
     # class init is fun- this method has a self arg that won't get used
     def _get_filefinder_path_hook(self=None):
         _file_finder_hook = None
-        if PY3:
-            # try to find the FileFinder hook to call for fallback path-based imports in Py3
-            _file_finder_hook = [ph for ph in sys.path_hooks if 'FileFinder' in repr(ph)]
-            if len(_file_finder_hook) != 1:
-                raise Exception('need exactly one FileFinder import hook (found {0})'.format(len(_file_finder_hook)))
-            _file_finder_hook = _file_finder_hook[0]
+        # try to find the FileFinder hook to call for fallback path-based imports in Py3
+        _file_finder_hook = [ph for ph in sys.path_hooks if 'FileFinder' in repr(ph)]
+        if len(_file_finder_hook) != 1:
+            raise Exception('need exactly one FileFinder import hook (found {0})'.format(len(_file_finder_hook)))
+        _file_finder_hook = _file_finder_hook[0]
 
         return _file_finder_hook
 
@@ -289,20 +417,16 @@ class _AnsiblePathHookFinder:
             # out what we *shouldn't* be loading with the limited info it has. So we'll just delegate to the
             # normal path-based loader as best we can to service it. This also allows us to take advantage of Python's
             # built-in FS caching and byte-compilation for most things.
-            if PY3:
-                # create or consult our cached file finder for this path
-                if not self._file_finder:
-                    try:
-                        self._file_finder = _AnsiblePathHookFinder._filefinder_path_hook(self._pathctx)
-                    except ImportError:
-                        # FUTURE: log at a high logging level? This is normal for things like python36.zip on the path, but
-                        # might not be in some other situation...
-                        return None
+            # create or consult our cached file finder for this path
+            if not self._file_finder:
+                try:
+                    self._file_finder = _AnsiblePathHookFinder._filefinder_path_hook(self._pathctx)
+                except ImportError:
+                    # FUTURE: log at a high logging level? This is normal for things like python36.zip on the path, but
+                    # might not be in some other situation...
+                    return None
 
-                return self._file_finder
-
-            # call py2's internal loader
-            return pkgutil.ImpImporter(self._pathctx)
+            return self._file_finder
 
     def find_module(self, fullname, path=None):
         # we ignore the passed in path here- use what we got from the path hook init
@@ -423,6 +547,9 @@ class _AnsibleCollectionPkgLoaderBase:
 
         return module_path, has_code, package_path
 
+    def get_resource_reader(self, fullname):
+        return _AnsibleTraversableResources(fullname, self)
+
     def exec_module(self, module):
         # short-circuit redirect; avoid reinitializing existing modules
         if self._redirect_module:
@@ -509,7 +636,7 @@ class _AnsibleCollectionPkgLoaderBase:
         return None
 
     def _synthetic_filename(self, fullname):
-        return '<ansible_synthetic_collection_package>'
+        return SYNTHETIC_PACKAGE_NAME
 
     def get_filename(self, fullname):
         if fullname != self._fullname:
@@ -748,6 +875,9 @@ class _AnsibleInternalRedirectLoader:
         if not self._redirect:
             raise ImportError('not redirected, go ask path_hook')
 
+    def get_resource_reader(self, fullname):
+        return _AnsibleTraversableResources(fullname, self)
+
     def exec_module(self, module):
         # should never see this
         if not self._redirect:
@@ -962,7 +1092,7 @@ class AnsibleCollectionRef:
 
 def _get_collection_path(collection_name):
     collection_name = to_native(collection_name)
-    if not collection_name or not isinstance(collection_name, string_types) or len(collection_name.split('.')) != 2:
+    if not collection_name or not isinstance(collection_name, str) or len(collection_name.split('.')) != 2:
         raise ValueError('collection_name must be a non-empty string of the form namespace.collection')
     try:
         collection_pkg = import_module('ansible_collections.' + collection_name)
@@ -1145,7 +1275,7 @@ def _iter_modules_impl(paths, prefix=''):
 
 def _get_collection_metadata(collection_name):
     collection_name = to_native(collection_name)
-    if not collection_name or not isinstance(collection_name, string_types) or len(collection_name.split('.')) != 2:
+    if not collection_name or not isinstance(collection_name, str) or len(collection_name.split('.')) != 2:
         raise ValueError('collection_name must be a non-empty string of the form namespace.collection')
 
     try:

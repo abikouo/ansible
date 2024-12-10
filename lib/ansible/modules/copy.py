@@ -4,20 +4,23 @@
 # Copyright: (c) 2017, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import absolute_import, division, print_function
-__metaclass__ = type
+from __future__ import annotations
 
 
-DOCUMENTATION = r'''
+DOCUMENTATION = r"""
 ---
 module: copy
 version_added: historical
 short_description: Copy files to remote locations
 description:
-    - The C(copy) module copies a file from the local or remote machine to a location on the remote machine.
+    - The M(ansible.builtin.copy) module copies a file or a directory structure from the local or remote machine to a location on the remote machine.
+      File system meta-information (permissions, ownership, etc.) may be set, even when the file or directory already exists on the target system.
+      Some meta-information may be copied on request.
+    - Get meta-information with the M(ansible.builtin.stat) module.
+    - Set meta-information with the M(ansible.builtin.file) module.
     - Use the M(ansible.builtin.fetch) module to copy files from remote locations to the local box.
     - If you need variable interpolation in copied files, use the M(ansible.builtin.template) module.
-      Using a variable in the C(content) field will result in unpredictable output.
+      Using a variable with the O(content) parameter produces unpredictable results.
     - For Windows targets, use the M(ansible.windows.win_copy) module instead.
 options:
   src:
@@ -25,25 +28,25 @@ options:
     - Local path to a file to copy to the remote server.
     - This can be absolute or relative.
     - If path is a directory, it is copied recursively. In this case, if path ends
-      with "/", only inside contents of that directory are copied to destination.
-      Otherwise, if it does not end with "/", the directory itself with all contents
+      with C(/), only inside contents of that directory are copied to destination.
+      Otherwise, if it does not end with C(/), the directory itself with all contents
       is copied. This behavior is similar to the C(rsync) command line tool.
     type: path
   content:
     description:
-    - When used instead of C(src), sets the contents of a file directly to the specified value.
-    - Works only when C(dest) is a file. Creates the file if it does not exist.
-    - For advanced formatting or if C(content) contains a variable, use the
+    - When used instead of O(src), sets the contents of a file directly to the specified value.
+    - Works only when O(dest) is a file. Creates the file if it does not exist.
+    - For advanced formatting or if O(content) contains a variable, use the
       M(ansible.builtin.template) module.
     type: str
     version_added: '1.1'
   dest:
     description:
     - Remote absolute path where the file should be copied to.
-    - If C(src) is a directory, this must be a directory too.
-    - If C(dest) is a non-existent path and if either C(dest) ends with "/" or C(src) is a directory, C(dest) is created.
-    - If I(dest) is a relative path, the starting directory is determined by the remote host.
-    - If C(src) and C(dest) are files, the parent directory of C(dest) is not created and the task fails if it does not already exist.
+    - If O(src) is a directory, this must be a directory too.
+    - If O(dest) is a non-existent path and if either O(dest) ends with C(/) or O(src) is a directory, O(dest) is created.
+    - If O(dest) is a relative path, the starting directory is determined by the remote host.
+    - If O(src) and O(dest) are files, the parent directory of O(dest) is not created and the task fails if it does not already exist.
     type: path
     required: yes
   backup:
@@ -55,8 +58,8 @@ options:
   force:
     description:
     - Influence whether the remote file must always be replaced.
-    - If C(true), the remote file will be replaced when contents are different than the source.
-    - If C(false), the file will only be transferred if the destination does not exist.
+    - If V(true), the remote file will be replaced when contents are different than the source.
+    - If V(false), the file will only be transferred if the destination does not exist.
     type: bool
     default: yes
     version_added: '1.1'
@@ -65,33 +68,34 @@ options:
     - The permissions of the destination file or directory.
     - For those used to C(/usr/bin/chmod) remember that modes are actually octal numbers.
       You must either add a leading zero so that Ansible's YAML parser knows it is an octal number
-      (like C(0644) or C(01777)) or quote it (like C('644') or C('1777')) so Ansible receives a string
+      (like V(0644) or V(01777)) or quote it (like V('644') or V('1777')) so Ansible receives a string
       and can do its own conversion from string into number. Giving Ansible a number without following
       one of these rules will end up with a decimal number which will have unexpected results.
-    - As of Ansible 1.8, the mode may be specified as a symbolic mode (for example, C(u+rwx) or C(u=rw,g=r,o=r)).
-    - As of Ansible 2.3, the mode may also be the special string C(preserve).
-    - C(preserve) means that the file will be given the same permissions as the source file.
-    - When doing a recursive copy, see also C(directory_mode).
-    - If C(mode) is not specified and the destination file B(does not) exist, the default C(umask) on the system will be used
+    - As of Ansible 1.8, the mode may be specified as a symbolic mode (for example, V(u+rwx) or V(u=rw,g=r,o=r)).
+    - As of Ansible 2.3, the mode may also be the special string V(preserve).
+    - V(preserve) means that the file will be given the same permissions as the source file.
+    - When doing a recursive copy, see also O(directory_mode).
+    - If O(mode) is not specified and the destination file B(does not) exist, the default C(umask) on the system will be used
       when setting the mode for the newly created file.
-    - If C(mode) is not specified and the destination file B(does) exist, the mode of the existing file will be used.
-    - Specifying C(mode) is the best way to ensure files are created with the correct permissions.
+    - If O(mode) is not specified and the destination file B(does) exist, the mode of the existing file will be used.
+    - Specifying O(mode) is the best way to ensure files are created with the correct permissions.
       See CVE-2020-1736 for further details.
   directory_mode:
     description:
-    - When doing a recursive copy set the mode for the directories.
-    - If this is not set we will use the system defaults.
-    - The mode is only set on directories which are newly created, and will not affect those that already existed.
+    - Set the access permissions of newly created directories to the given mode.
+      Permissions on existing directories do not change.
+    - See O(mode) for the syntax of accepted values.
+    - The target system's defaults determine permissions when this parameter is not set.
     type: raw
     version_added: '1.5'
   remote_src:
     description:
-    - Influence whether C(src) needs to be transferred or already is present remotely.
-    - If C(false), it will search for C(src) on the controller node.
-    - If C(true) it will search for C(src) on the managed (remote) node.
-    - C(remote_src) supports recursive copying as of version 2.8.
-    - C(remote_src) only works with C(mode=preserve) as of version 2.6.
-    - Autodecryption of files does not work when C(remote_src=yes).
+    - Influence whether O(src) needs to be transferred or already is present remotely.
+    - If V(false), it will search for O(src) on the controller node.
+    - If V(true), it will search for O(src) on the managed (remote) node.
+    - O(remote_src) supports recursive copying as of version 2.8.
+    - O(remote_src) only works with O(mode=preserve) as of version 2.6.
+    - Auto-decryption of files does not work when O(remote_src=yes).
     type: bool
     default: no
     version_added: '2.0'
@@ -105,7 +109,6 @@ options:
     description:
     - This flag indicates that filesystem links in the source tree, if they exist, should be followed.
     type: bool
-    default: yes
     version_added: '2.4'
   checksum:
     description:
@@ -151,9 +154,9 @@ attributes:
   vault:
     support: full
     version_added: '2.2'
-'''
+"""
 
-EXAMPLES = r'''
+EXAMPLES = r"""
 - name: Copy file with owner and permissions
   ansible.builtin.copy:
     src: /srv/myfiles/foo.conf
@@ -216,9 +219,9 @@ EXAMPLES = r'''
     src: /etc/foo.conf
     dest: /path/to/link  # link to /path/to/file
     follow: no
-'''
+"""
 
-RETURN = r'''
+RETURN = r"""
 dest:
     description: Destination file/path.
     returned: success
@@ -268,7 +271,7 @@ mode:
     description: Permissions of the target, after execution.
     returned: success
     type: str
-    sample: "0644"
+    sample: '0644'
 size:
     description: Size of the target, after execution.
     returned: success
@@ -279,29 +282,21 @@ state:
     returned: success
     type: str
     sample: file
-'''
+"""
 
 import errno
 import filecmp
 import grp
 import os
 import os.path
-import platform
 import pwd
 import shutil
 import stat
 import tempfile
 import traceback
 
-from ansible.module_utils._text import to_bytes, to_native
+from ansible.module_utils.common.text.converters import to_bytes, to_native
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.process import get_bin_path
-from ansible.module_utils.common.locale import get_best_parsable_locale
-from ansible.module_utils.six import PY3
-
-
-# The AnsibleModule object
-module = None
 
 
 class AnsibleModuleError(Exception):
@@ -309,25 +304,10 @@ class AnsibleModuleError(Exception):
         self.results = results
 
 
-# Once we get run_command moved into common, we can move this into a common/files module.  We can't
-# until then because of the module.run_command() method.  We may need to move it into
-# basic::AnsibleModule() until then but if so, make it a private function so that we don't have to
-# keep it for backwards compatibility later.
-def clear_facls(path):
-    setfacl = get_bin_path('setfacl')
-    # FIXME "setfacl -b" is available on Linux and FreeBSD. There is "setfacl -D e" on z/OS. Others?
-    acl_command = [setfacl, '-b', path]
-    b_acl_command = [to_bytes(x) for x in acl_command]
-    locale = get_best_parsable_locale(module)
-    rc, out, err = module.run_command(b_acl_command, environ_update=dict(LANG=locale, LC_ALL=locale, LC_MESSAGES=locale))
-    if rc != 0:
-        raise RuntimeError('Error running "{0}": stdout: "{1}"; stderr: "{2}"'.format(' '.join(b_acl_command), out, err))
-
-
 def split_pre_existing_dir(dirname):
-    '''
+    """
     Return the first pre-existing directory and a list of the new directories that will be created.
-    '''
+    """
     head, tail = os.path.split(dirname)
     b_head = to_bytes(head, errors='surrogate_or_strict')
     if head == '':
@@ -343,9 +323,9 @@ def split_pre_existing_dir(dirname):
 
 
 def adjust_recursive_directory_permissions(pre_existing_dir, new_directory_list, module, directory_args, changed):
-    '''
+    """
     Walk the new directories list and make sure that permissions are as we would expect
-    '''
+    """
 
     if new_directory_list:
         working_dir = os.path.join(pre_existing_dir, new_directory_list.pop(0))
@@ -524,8 +504,6 @@ def copy_common_dirs(src, dest, module):
 
 def main():
 
-    global module
-
     module = AnsibleModule(
         # not checking because of daisy chain to file module
         argument_spec=dict(
@@ -537,7 +515,7 @@ def main():
             force=dict(type='bool', default=True),
             validate=dict(type='str'),
             directory_mode=dict(type='raw'),
-            remote_src=dict(type='bool'),
+            remote_src=dict(type='bool', default=False),
             local_follow=dict(type='bool'),
             checksum=dict(type='str'),
             follow=dict(type='bool', default=False),
@@ -616,6 +594,8 @@ def main():
                 e.result['msg'] += ' Could not copy to {0}'.format(dest)
                 module.fail_json(**e.results)
 
+            if module.check_mode:
+                module.exit_json(msg='dest directory %s would be created' % dirname, changed=True, src=src)
             os.makedirs(b_dirname)
             changed = True
             directory_args = module.load_file_common_arguments(module.params)
@@ -687,7 +667,7 @@ def main():
                 b_mysrc = b_src
                 if remote_src and os.path.isfile(b_src):
 
-                    _, b_mysrc = tempfile.mkstemp(dir=os.path.dirname(b_dest))
+                    dummy, b_mysrc = tempfile.mkstemp(dir=os.path.dirname(b_dest))
 
                     shutil.copyfile(b_src, b_mysrc)
                     try:
@@ -698,54 +678,8 @@ def main():
                         else:
                             raise
 
-                # might be needed below
-                if PY3 and hasattr(os, 'listxattr'):
-                    try:
-                        src_has_acls = 'system.posix_acl_access' in os.listxattr(src)
-                    except Exception as e:
-                        # assume unwanted ACLs by default
-                        src_has_acls = True
-
                 # at this point we should always have tmp file
-                module.atomic_move(b_mysrc, dest, unsafe_writes=module.params['unsafe_writes'])
-
-                if PY3 and hasattr(os, 'listxattr') and platform.system() == 'Linux' and not remote_src:
-                    # atomic_move used above to copy src into dest might, in some cases,
-                    # use shutil.copy2 which in turn uses shutil.copystat.
-                    # Since Python 3.3, shutil.copystat copies file extended attributes:
-                    # https://docs.python.org/3/library/shutil.html#shutil.copystat
-                    # os.listxattr (along with others) was added to handle the operation.
-
-                    # This means that on Python 3 we are copying the extended attributes which includes
-                    # the ACLs on some systems - further limited to Linux as the documentation above claims
-                    # that the extended attributes are copied only on Linux. Also, os.listxattr is only
-                    # available on Linux.
-
-                    # If not remote_src, then the file was copied from the controller. In that
-                    # case, any filesystem ACLs are artifacts of the copy rather than preservation
-                    # of existing attributes. Get rid of them:
-
-                    if src_has_acls:
-                        # FIXME If dest has any default ACLs, there are not applied to src now because
-                        # they were overridden by copystat. Should/can we do anything about this?
-                        # 'system.posix_acl_default' in os.listxattr(os.path.dirname(b_dest))
-
-                        try:
-                            clear_facls(dest)
-                        except ValueError as e:
-                            if 'setfacl' in to_native(e):
-                                # No setfacl so we're okay.  The controller couldn't have set a facl
-                                # without the setfacl command
-                                pass
-                            else:
-                                raise
-                        except RuntimeError as e:
-                            # setfacl failed.
-                            if 'Operation not supported' in to_native(e):
-                                # The file system does not support ACLs.
-                                pass
-                            else:
-                                raise
+                module.atomic_move(b_mysrc, dest, unsafe_writes=module.params['unsafe_writes'], keep_dest_attrs=not remote_src)
 
             except (IOError, OSError):
                 module.fail_json(msg="failed to copy: %s to %s" % (src, dest), traceback=traceback.format_exc())
@@ -812,9 +746,8 @@ def main():
     if backup_file:
         res_args['backup_file'] = backup_file
 
-    if not module.check_mode:
-        file_args = module.load_file_common_arguments(module.params, path=dest)
-        res_args['changed'] = module.set_fs_attributes_if_different(file_args, res_args['changed'])
+    file_args = module.load_file_common_arguments(module.params, path=dest)
+    res_args['changed'] = module.set_fs_attributes_if_different(file_args, res_args['changed'])
 
     module.exit_json(**res_args)
 

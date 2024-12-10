@@ -4,8 +4,7 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 # PYTHON_ARGCOMPLETE_OK
 
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 # ansible.cli needs to be imported first, to ensure the source bin/* scripts run that code first
 from ansible.cli import CLI
@@ -14,7 +13,7 @@ from ansible import context
 from ansible.cli.arguments import option_helpers as opt_help
 from ansible.errors import AnsibleError, AnsibleOptionsError, AnsibleParserError
 from ansible.executor.task_queue_manager import TaskQueueManager
-from ansible.module_utils._text import to_text
+from ansible.module_utils.common.text.converters import to_text
 from ansible.parsing.splitter import parse_kv
 from ansible.parsing.utils.yaml import from_yaml
 from ansible.playbook import Playbook
@@ -25,14 +24,14 @@ display = Display()
 
 
 class AdHocCLI(CLI):
-    ''' is an extra-simple tool/framework/API for doing 'remote things'.
+    """ is an extra-simple tool/framework/API for doing 'remote things'.
         this command allows you to define and run a single task 'playbook' against a set of hosts
-    '''
+    """
 
     name = 'ansible'
 
     def init_parser(self):
-        ''' create an options parser for bin/ansible '''
+        """ create an options parser for bin/ansible """
         super(AdHocCLI, self).init_parser(usage='%prog <host-pattern> [options]',
                                           desc="Define and run a single task 'playbook' against a set of hosts",
                                           epilog="Some actions do not make sense in Ad-Hoc (include, meta, etc)")
@@ -61,7 +60,7 @@ class AdHocCLI(CLI):
         self.parser.add_argument('args', metavar='pattern', help='host pattern')
 
     def post_process_args(self, options):
-        '''Post process and validate options for bin/ansible '''
+        """Post process and validate options for bin/ansible """
 
         options = super(AdHocCLI, self).post_process_args(options)
 
@@ -99,7 +98,7 @@ class AdHocCLI(CLI):
             tasks=[mytask])
 
     def run(self):
-        ''' create and execute the single task playbook '''
+        """ create and execute the single task playbook """
 
         super(AdHocCLI, self).run()
 

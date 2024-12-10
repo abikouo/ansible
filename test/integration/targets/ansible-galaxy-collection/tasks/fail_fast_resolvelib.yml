@@ -1,5 +1,5 @@
 # resolvelib>=0.6.0 added an 'incompatibilities' parameter to find_matches
-# If incompatibilities aren't removed from the viable candidates, this example causes infinite resursion
+# If incompatibilities aren't removed from the viable candidates, this example causes infinite recursion
 - name: test resolvelib removes incompatibilites in find_matches and errors quickly (prevent infinite recursion)
   block:
     - name: create collection dir
@@ -7,7 +7,7 @@
         dest: "{{ galaxy_dir }}/resolvelib/ns/coll"
         state: directory
 
-    - name: create galaxy.yml with a dependecy on a galaxy-sourced collection
+    - name: create galaxy.yml with a dependency on a galaxy-sourced collection
       copy:
         dest: "{{ galaxy_dir }}/resolvelib/ns/coll/galaxy.yml"
         content: |

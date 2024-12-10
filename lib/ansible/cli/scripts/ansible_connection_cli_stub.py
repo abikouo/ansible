@@ -1,14 +1,8 @@
-#!/usr/bin/env python
 # Copyright: (c) 2017, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
-from __future__ import (absolute_import, division, print_function)
+from __future__ import annotations
 
-__metaclass__ = type
-
-
-import argparse
 import fcntl
-import hashlib
 import io
 import os
 import pickle
@@ -24,12 +18,12 @@ from contextlib import contextmanager
 
 from ansible import constants as C
 from ansible.cli.arguments import option_helpers as opt_help
-from ansible.module_utils._text import to_bytes, to_text
+from ansible.module_utils.common.text.converters import to_bytes, to_text
 from ansible.module_utils.connection import Connection, ConnectionError, send_data, recv_data
 from ansible.module_utils.service import fork_process
 from ansible.parsing.ajson import AnsibleJSONEncoder, AnsibleJSONDecoder
 from ansible.playbook.play_context import PlayContext
-from ansible.plugins.loader import connection_loader
+from ansible.plugins.loader import connection_loader, init_plugin_loader
 from ansible.utils.path import unfrackpath, makedirs_safe
 from ansible.utils.display import Display
 from ansible.utils.jsonrpc import JsonRpcServer
@@ -43,13 +37,6 @@ def read_stream(byte_stream):
     data = byte_stream.read(size)
     if len(data) < size:
         raise Exception("EOF found before data was complete")
-
-    data_hash = to_text(byte_stream.readline().strip())
-    if data_hash != hashlib.sha1(data).hexdigest():
-        raise Exception("Read {0} bytes, but data did not match checksum".format(size))
-
-    # restore escaped loose \r characters
-    data = data.replace(br'\r', b'\r')
 
     return data
 
@@ -70,10 +57,10 @@ def file_lock(lock_path):
 
 
 class ConnectionProcess(object):
-    '''
+    """
     The connection process wraps around a Connection object that manages
     the connection to a remote device that persists over the playbook
-    '''
+    """
     def __init__(self, fd, play_context, socket_path, original_path, task_uuid=None, ansible_playbook_pid=None):
         self.play_context = play_context
         self.socket_path = socket_path
@@ -225,11 +212,12 @@ def main(args=None):
     """ Called to initiate the connect to the remote device
     """
 
-    parser = opt_help.create_base_parser(prog='ansible-connection')
+    parser = opt_help.create_base_parser(prog=None)
     opt_help.add_verbosity_options(parser)
     parser.add_argument('playbook_pid')
     parser.add_argument('task_uuid')
     args = parser.parse_args(args[1:] if args is not None else args)
+    init_plugin_loader()
 
     # initialize verbosity
     display.verbosity = args.verbosity

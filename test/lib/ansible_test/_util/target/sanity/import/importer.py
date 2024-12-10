@@ -1,6 +1,5 @@
 """Import the given python module(s) and report error(s) encountered."""
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 
 def main():
@@ -44,7 +43,8 @@ def main():
         # noinspection PyCompatibility
         from importlib import import_module
     except ImportError:
-        def import_module(name):
+        def import_module(name, package=None):  # type: (str, str | None) -> types.ModuleType
+            assert package is None
             __import__(name)
             return sys.modules[name]
 
@@ -159,7 +159,7 @@ def main():
             loader = self._get_loader(fullname, path=path)
             if loader is not None:
                 if has_py3_loader:
-                    # loader is expected to be Optional[importlib.abc.Loader], but RestrictedModuleLoader does not inherit from importlib.abc.Loder
+                    # loader is expected to be Optional[importlib.abc.Loader], but RestrictedModuleLoader does not inherit from importlib.abc.Loader
                     return spec_from_loader(fullname, loader)  # type: ignore[arg-type]
                 raise ImportError("Failed to import '%s' due to a bug in ansible-test. Check importlib imports for typos." % fullname)
             return None
@@ -540,24 +540,6 @@ def main():
                 warnings.filterwarnings(
                     "ignore",
                     "AnsibleCollectionFinder has already been configured")
-
-            if sys.version_info[0] == 2:
-                warnings.filterwarnings(
-                    "ignore",
-                    "Python 2 is no longer supported by the Python core team. Support for it is now deprecated in cryptography,"
-                    " and will be removed in a future release.")
-                warnings.filterwarnings(
-                    "ignore",
-                    "Python 2 is no longer supported by the Python core team. Support for it is now deprecated in cryptography,"
-                    " and will be removed in the next release.")
-
-            if sys.version_info[:2] == (3, 5):
-                warnings.filterwarnings(
-                    "ignore",
-                    "Python 3.5 support will be dropped in the next release ofcryptography. Please upgrade your Python.")
-                warnings.filterwarnings(
-                    "ignore",
-                    "Python 3.5 support will be dropped in the next release of cryptography. Please upgrade your Python.")
 
             try:
                 yield

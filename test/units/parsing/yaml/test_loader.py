@@ -16,17 +16,14 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# Make coding more python3-ish
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
+from __future__ import annotations
 
 from collections.abc import Sequence, Set, Mapping
 from io import StringIO
 
-from units.compat import unittest
+import unittest
 
 from ansible import errors
-from ansible.module_utils.six import text_type, binary_type
 from ansible.parsing.yaml.loader import AnsibleLoader
 from ansible.parsing import vault
 from ansible.parsing.yaml.objects import AnsibleVaultEncryptedUnicode
@@ -37,15 +34,6 @@ from units.mock.vault_helper import TextVaultSecret
 
 from yaml.parser import ParserError
 from yaml.scanner import ScannerError
-
-
-class NameStringIO(StringIO):
-    """In py2.6, StringIO doesn't let you set name because a baseclass has it
-    as readonly property"""
-    name = None
-
-    def __init__(self, *args, **kwargs):
-        super(NameStringIO, self).__init__(*args, **kwargs)
 
 
 class TestAnsibleLoaderBasic(unittest.TestCase):
@@ -66,7 +54,7 @@ class TestAnsibleLoaderBasic(unittest.TestCase):
         loader = AnsibleLoader(stream, 'myfile.yml')
         data = loader.get_single_data()
         self.assertEqual(data, u'Ansible')
-        self.assertIsInstance(data, text_type)
+        self.assertIsInstance(data, str)
 
         self.assertEqual(data.ansible_pos, ('myfile.yml', 2, 17))
 
@@ -77,7 +65,7 @@ class TestAnsibleLoaderBasic(unittest.TestCase):
         loader = AnsibleLoader(stream, 'myfile.yml')
         data = loader.get_single_data()
         self.assertEqual(data, u'Cafè Eñyei')
-        self.assertIsInstance(data, text_type)
+        self.assertIsInstance(data, str)
 
         self.assertEqual(data.ansible_pos, ('myfile.yml', 2, 17))
 
@@ -90,8 +78,8 @@ class TestAnsibleLoaderBasic(unittest.TestCase):
         data = loader.get_single_data()
         self.assertEqual(data, {'webster': 'daniel', 'oed': 'oxford'})
         self.assertEqual(len(data), 2)
-        self.assertIsInstance(list(data.keys())[0], text_type)
-        self.assertIsInstance(list(data.values())[0], text_type)
+        self.assertIsInstance(list(data.keys())[0], str)
+        self.assertIsInstance(list(data.values())[0], str)
 
         # Beginning of the first key
         self.assertEqual(data.ansible_pos, ('myfile.yml', 2, 17))
@@ -108,7 +96,7 @@ class TestAnsibleLoaderBasic(unittest.TestCase):
         data = loader.get_single_data()
         self.assertEqual(data, [u'a', u'b'])
         self.assertEqual(len(data), 2)
-        self.assertIsInstance(data[0], text_type)
+        self.assertIsInstance(data[0], str)
 
         self.assertEqual(data.ansible_pos, ('myfile.yml', 2, 17))
 
@@ -208,7 +196,7 @@ class TestAnsibleLoaderVault(unittest.TestCase, YamlTestUtils):
         return tagged_vaulted_var
 
     def _build_stream(self, yaml_text):
-        stream = NameStringIO(yaml_text)
+        stream = StringIO(yaml_text)
         stream.name = 'my.yml'
         return stream
 
@@ -229,13 +217,9 @@ class TestAnsibleLoaderVault(unittest.TestCase, YamlTestUtils):
 
     def test_embedded_vault_from_dump(self):
         avu = AnsibleVaultEncryptedUnicode.from_plaintext('setec astronomy', self.vault, self.vault_secret)
-        blip = {'stuff1': [{'a dict key': 24},
-                           {'shhh-ssh-secrets': avu,
-                            'nothing to see here': 'move along'}],
-                'another key': 24.1}
 
         blip = ['some string', 'another string', avu]
-        stream = NameStringIO()
+        stream = StringIO()
 
         self._dump_stream(blip, stream, dumper=AnsibleDumper)
 
@@ -247,7 +231,7 @@ class TestAnsibleLoaderVault(unittest.TestCase, YamlTestUtils):
 
         data_from_yaml = loader.get_data()
 
-        stream2 = NameStringIO(u'')
+        stream2 = StringIO(u'')
         # verify we can dump the object again
         self._dump_stream(data_from_yaml, stream2, dumper=AnsibleDumper)
 
@@ -297,7 +281,7 @@ class TestAnsibleLoaderVault(unittest.TestCase, YamlTestUtils):
 class TestAnsibleLoaderPlay(unittest.TestCase):
 
     def setUp(self):
-        stream = NameStringIO(u"""
+        stream = StringIO(u"""
                 - hosts: localhost
                   vars:
                     number: 1
@@ -355,10 +339,10 @@ class TestAnsibleLoaderPlay(unittest.TestCase):
 
     def walk(self, data):
         # Make sure there's no str in the data
-        self.assertNotIsInstance(data, binary_type)
+        self.assertNotIsInstance(data, bytes)
 
         # Descend into various container types
-        if isinstance(data, text_type):
+        if isinstance(data, str):
             # strings are a sequence so we have to be explicit here
             return
         elif isinstance(data, (Sequence, Set)):
